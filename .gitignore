@@ -1,0 +1,6 @@
+# Local memory: never commit it (it also carries its own .gitignore).
+.memory/
+
+# Python tooling cache.
+__pycache__/
+*.pyc

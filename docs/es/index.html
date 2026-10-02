@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memoria a largo plazo para IA</title>
+<meta name="description" content="Una memoria SQLite persistente, local y sólo de agregado para agentes de programación (Claude Code y Codex): qué es, cómo ayuda, sus límites y qué implica agregar el skill.">
+<link rel="stylesheet" href="../assets/style.css">
+<link rel="alternate" hreflang="en" href="../">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./">Memoria a largo plazo para IA</a>
+    <nav>
+      <a href="#problema">Por qué</a>
+      <a href="#funcionamiento">Cómo funciona</a>
+      <a href="#ventajas">Ventajas</a>
+      <a href="#limitaciones">Limitaciones</a>
+      <a href="#implica">Qué implica</a>
+      <a href="#empezar">Empezar</a>
+      <a href="#preguntas">Preguntas</a>
+    </nav>
+    <a class="lang" href="../">English</a>
+  </div>
+</header>
+
+<main>
+<div class="wrap hero">
+  <p class="eyebrow">Un skill para Claude Code y Codex · v0.1.0</p>
+  <h1>Tu agente olvida. Su memoria no tiene por qué.</h1>
+  <p class="lead">Long-Term Memory for AI les da a los agentes de programación una memoria persistente que vive en un
+    archivo SQLite local dentro de cada proyecto. Una ventana nueva, sin ningún contexto, arranca desde lo que se decidió,
+    lo que está pendiente y lo que pasó, en lugar de reconstruirlo de conversaciones viejas o de notas sueltas.</p>
+  <div class="actions">
+    <a class="button primary" href="#empezar">Empezar</a>
+    <a class="button" href="https://github.com/proteo5/long-term-memory-for-AI">Ver en GitHub</a>
+  </div>
+  <p class="meta">Apache-2.0 · Sólo la biblioteca estándar de Python 3.9+ · Funciona sin internet · Tus datos nunca salen de tu máquina</p>
+</div>
+
+<section id="problema">
+  <div class="wrap">
+    <h2>El problema</h2>
+    <p class="intro">Los agentes son buenos dentro de una conversación y olvidadizos entre una y otra.</p>
+    <div class="grid">
+      <div class="card"><h3>Cada chat empieza en blanco</h3><p>Las decisiones de ayer, sus razones y las preguntas abiertas desaparecen al abrir una ventana nueva.</p></div>
+      <div class="card"><h3>Compactar pierde detalle</h3><p>Las sesiones largas se resumen; las palabras exactas, las fechas y quién dijo qué son lo primero que se pierde.</p></div>
+      <div class="card"><h3>Las notas en Markdown se desvían</h3><p>Los archivos de notas crecen, se contradicen y no pueden responder "cuántos", "desde cuándo" ni "qué cambió".</p></div>
+      <div class="card"><h3>Nadie puede auditarlo</h3><p>Cuando un agente "recuerda" algo mal, no hay fuente, ni autor, ni historia que revisar.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="funcionamiento">
+  <div class="wrap">
+    <h2>Cómo funciona</h2>
+    <p class="intro">Tres piezas: un <strong>skill</strong> que le enseña el protocolo al agente, un <strong>helper</strong>
+      (<code>memory.py</code>) que es la única entrada y salida, y <strong>un archivo SQLite</strong> por proyecto en
+      <code>.memory/</code>.</p>
+    <div class="flow">
+      <div class="step"><h3>Empieza la sesión</h3><p>Un hook inyecta el resumen: dueño, proyecto, decisiones vigentes, convenciones, preguntas abiertas, lecciones, pendientes y lo más reciente.</p></div>
+      <div class="step"><h3>Trabajas como siempre</h3><p>Le hablas al agente en tu idioma. Cuando necesita historia, consulta la memoria en lugar de adivinar.</p></div>
+      <div class="step"><h3>El agente registra</h3><p>Decisiones, respuestas, lecciones, hechos y eventos entran por el helper, con tus palabras literales como evidencia y el actor detrás.</p></div>
+      <div class="step"><h3>Siguiente sesión, cualquier agente</h3><p>Claude Code o Codex, hoy o dentro de un año, parten de la misma memoria, con todos los estados anteriores todavía legibles.</p></div>
+    </div>
+    <div class="two" style="margin-top:28px">
+      <div>
+        <h3>Un modelo genérico, sin tablas de dominio</h3>
+        <p>Todo se guarda como <strong>entidades</strong> (una persona, un módulo, un caso, un capítulo), <strong>hechos en el
+          tiempo</strong> (válidos desde, válidos hasta), <strong>eventos</strong> (una decisión, una entrega, una sesión de
+          trabajo) con atributos y enlaces, y <strong>observaciones</strong> (lecturas de sensores o sistemas). La misma
+          estructura se ha probado con un proyecto de software, una ventanilla de trámites cuyos procesos cambian en plena
+          operación, un hotel, venta de lotes, una cadena de suministro y un autor que revisa cinco libros.</p>
+      </div>
+      <div>
+        <h3>Nada se pierde</h3>
+        <p>La memoria es sólo de agregado (append-only), y la base lo hace cumplir con triggers. Un hecho equivocado se
+          <em>retracta</em> con su motivo, uno que terminó se <em>cierra</em>, un evento erróneo se <em>anula</em>, lo que
+          cambia de nombre conserva el anterior y lo retirado conserva su historia. Puedes preguntar cómo estaba la memoria
+          en cualquier fecha pasada.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="recuerda">
+  <div class="wrap">
+    <h2>Qué recuerda</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tipo</th><th>Ejemplo</th></tr></thead>
+        <tbody>
+          <tr><td>Decisiones y sus razones</td><td>"Una base por proyecto — porque las memorias nunca deben mezclarse entre proyectos."</td></tr>
+          <tr><td>Convenciones y preferencias</td><td>"Lo interno en inglés; responder en el idioma de la persona."</td></tr>
+          <tr><td>Preguntas abiertas y respuestas</td><td>Una pregunta de marzo y la respuesta que la cerró en mayo.</td></tr>
+          <tr><td>Lecciones</td><td>"Correr las pruebas con un intérprete limpio: el de siempre ocultaba un error de portabilidad."</td></tr>
+          <tr><td>Personas, roles y actores</td><td>Quién es dueño de qué, quién tiene un rol desde cuándo, qué sistema o sensor produjo un registro.</td></tr>
+          <tr><td>Pendientes y solicitudes</td><td>Una revisión esperando a la editora; un comentario esperando al autor hasta que se resuelva.</td></tr>
+          <tr><td>Hechos en el tiempo</td><td>Un estado, un responsable, un precio — cada uno con cuándo empezó y terminó.</td></tr>
+          <tr><td>Procesos y documentos</td><td>Flujos versionados con roles y excepciones; textos versionados párrafo por párrafo.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="ventajas">
+  <div class="wrap">
+    <h2>Cómo ayuda</h2>
+    <div class="grid">
+      <div class="card good"><h3>Arranques en frío que funcionan</h3><p>Una ventana nueva responde "¿qué decidimos sobre X y por qué?" con registros guardados, no con una suposición.</p></div>
+      <div class="card good"><h3>Respuestas con respaldo</h3><p>Cada registro lleva su texto fuente y su actor. El agente separa lo recuperado, las ausencias y sus propias inferencias.</p></div>
+      <div class="card good"><h3>Preguntas sin SQL</h3><p>Totales, rankings y listados (<code>aggregate</code>, <code>list</code>), estados derivados, recetas guardadas, búsqueda <code>recall</code> y <code>--as-of</code> para cualquier fecha pasada.</p></div>
+      <div class="card good"><h3>Una memoria, dos agentes</h3><p>Claude Code y Codex leen y escriben el mismo archivo con el mismo helper.</p></div>
+      <div class="card good"><h3>Privada por diseño</h3><p>Un archivo local, excluido de Git, sin red, sin servicio, sin cuenta. Nada en qué registrarse.</p></div>
+      <div class="card good"><h3>Actualizaciones seguras</h3><p>Los cambios de esquema llegan como migraciones: las aditivas se aplican al abrir, las transformadoras respaldan primero, y todo cambio queda registrado.</p></div>
+      <div class="card good"><h3>El agente no decide por ti</h3><p>Decisiones, convenciones, retracciones y anulaciones deben venir de una persona. Lo que el agente nota por su cuenta queda marcado como observación suya.</p></div>
+      <div class="card good"><h3>Probada a escala</h3><p>Probada con ~358,000 eventos, 1 millón de enlaces y 1.3 millones de atributos en una memoria de 1.5 GB: consultas selectivas de 70 a 190 ms y agregaciones completas en unos 3 s.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="limitaciones">
+  <div class="wrap">
+    <h2>Limitaciones</h2>
+    <p class="intro">La versión 0.1.0 ya es útil, y éstos son sus límites, dichos con honestidad.</p>
+    <div class="grid">
+      <div class="card warn"><h3>Una máquina, un proyecto</h3><p>La memoria es un archivo local. No hay sincronización, ni servidor, ni forma de compartirla entre compañeros o computadoras. No llega a claude.ai en el navegador.</p></div>
+      <div class="card warn"><h3>Vale lo que se registra</h3><p>El agente decide qué guardar siguiendo el skill. Puede omitir cosas o registrarlas imperfectamente; la evidencia y la historia lo hacen visible y corregible, no imposible.</p></div>
+      <div class="card warn"><h3>Nada se puede borrar</h3><p>Al ser sólo de agregado, un dato sensible no se puede eliminar con el helper; sólo corregir o retractar. No guardes secretos ni datos que podrían obligarte a borrar.</p></div>
+      <div class="card warn"><h3>No está cifrada</h3><p>Quien pueda leer la carpeta del proyecto puede leer el archivo de memoria. Protégelo como el resto de tu código.</p></div>
+      <div class="card warn"><h3>Búsqueda por palabras, no semántica</h3><p><code>recall</code> usa la búsqueda de texto completo de SQLite (con singular y plural), no embeddings. Los sinónimos sólo aparecen si las palabras están.</p></div>
+      <div class="card warn"><h3>Consume algo de contexto</h3><p>El resumen se inyecta al iniciar cada sesión: los 8 elementos más recientes por sección, normalmente unos pocos miles de tokens. Cada mensaje suma un recordatorio de una línea.</p></div>
+      <div class="card warn"><h3>Pensada para pocos escritores</h3><p>SQLite soporta que unos cuantos agentes escriban a la vez (se esperan entre sí). No es un servidor de base de datos multiusuario.</p></div>
+      <div class="card warn"><h3>Versión temprana</h3><p>Los comandos y el esquema todavía pueden cambiar. Las actualizaciones migran las memorias existentes, y una memoria más nueva abierta por un helper más viejo queda en sólo lectura en lugar de dañarse.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="implica">
+  <div class="wrap">
+    <h2>Qué implica agregar el skill</h2>
+    <p class="intro">Antes de instalarlo, esto es exactamente lo que cambia en tu máquina y en tus proyectos.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Qué</th><th>Dónde</th><th>Detalle</th></tr></thead>
+        <tbody>
+          <tr><td>El skill</td><td><code>~/.claude/skills/project-memory/</code> o <code>~/.codex/skills/…</code></td><td><code>SKILL.md</code> y <code>scripts/</code> (helper, paquete, migraciones). Lo copia el instalador; reinstala para actualizar.</td></tr>
+          <tr><td>La memoria</td><td><code>&lt;proyecto&gt;/.memory/memory.sqlite</code></td><td>Se crea en el primer chat, después de que das tu nombre y tu clave. Trae su propio <code>.gitignore</code>.</td></tr>
+          <tr><td>Respaldos</td><td><code>.memory/backups/</code> o la carpeta que elijas</td><td>Los hace <code>backup</code> y también se hacen antes de migraciones transformadoras. Guardarlos en otro lugar te toca a ti.</td></tr>
+          <tr><td>Hooks (Claude Code)</td><td><code>&lt;proyecto&gt;/.claude/settings.json</code></td><td>Al iniciar la sesión corre <code>brief</code>; con cada mensaje, <code>reminder</code>. Ambos siempre terminan bien y nunca bloquean.</td></tr>
+          <tr><td>Instrucciones</td><td><code>CLAUDE.md</code> o <code>AGENTS.md</code></td><td>Un párrafo que le pide al agente leer primero la memoria y no usar archivos Markdown como memoria.</td></tr>
+          <tr><td>Comandos que corre el agente</td><td>Tu terminal</td><td><code>python …/memory.py &lt;comando&gt;</code>. Tu agente puede pedir permiso cada vez; puedes autorizar el comando del helper en su configuración.</td></tr>
+          <tr><td>Red</td><td>Ninguna</td><td>El helper no hace llamadas de red. Lee y escribe un archivo.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="two" style="margin-top:28px">
+      <div>
+        <h3>Tu parte</h3>
+        <ul class="clean">
+          <li>Darle al agente tu nombre y una clave una vez (nunca los inventa).</li>
+          <li>Decir cuándo algo es una decisión, y por qué. El agente la registra como tuya.</li>
+          <li>Respaldar la memoria de vez en cuando (<code>backup</code>); el resumen muestra la fecha del último respaldo.</li>
+          <li>Reinstalar el skill cuando actualices el repositorio.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Quitarlo</h3>
+        <ul class="clean">
+          <li>Borra la carpeta del skill, los hooks y el párrafo de <code>CLAUDE.md</code>/<code>AGENTS.md</code>.</li>
+          <li>El archivo de memoria se queda en <code>.memory/</code>. Es tuyo: una base SQLite común que cualquier herramienta puede leer.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="empezar">
+  <div class="wrap">
+    <h2>Empezar</h2>
+    <p class="intro">Requisitos: Python 3.9+ disponible como <code>python</code> y SQLite con FTS5 (incluido en las
+      distribuciones habituales). En Windows, las zonas horarias con nombre requieren <code>pip install tzdata</code>; sin él,
+      la zona del sistema sigue funcionando.</p>
+    <h3>1 · Instala el skill (una vez por máquina)</h3>
+<pre><code>git clone https://github.com/proteo5/long-term-memory-for-AI
+cd long-term-memory-for-AI
+python tools/install_skill.py --target ~/.claude/skills/project-memory
+python tools/install_skill.py --target ~/.codex/skills/project-memory</code></pre>
+    <h3>2 · Indícale al proyecto que lo use</h3>
+    <p>Agrega al <code>CLAUDE.md</code> o <code>AGENTS.md</code> del proyecto (puede ir en español; lo guardado seguirá en inglés):</p>
+<pre><code>## Memoria persistente
+
+Este proyecto usa el skill `project-memory`. Al iniciar cada conversación,
+ejecuta `brief` y sigue el arranque en frío antes de responder. La memoria
+SQLite es la fuente de verdad; no reconstruyas desde el historial del chat lo
+que puede consultarse ahí, y no uses archivos Markdown como memoria.</code></pre>
+    <h3>3 · Agrega los hooks (Claude Code)</h3>
+    <p>En <code>&lt;proyecto&gt;/.claude/settings.json</code>, combinado con lo que ya tenga:</p>
+<pre><code>{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "startup|resume|clear|compact",
+      "hooks": [{"type": "command", "timeout": 30,
+                 "command": "python ~/.claude/skills/project-memory/scripts/memory.py brief --format hook"}]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{"type": "command", "timeout": 10,
+                 "command": "python ~/.claude/skills/project-memory/scripts/memory.py reminder"}]
+    }]
+  }
+}</code></pre>
+    <h3>4 · Abre un chat nuevo</h3>
+    <p>El agente nota que todavía no hay memoria, te pide tu nombre y una clave como <code>person:ana</code>, y la crea.
+      Desde ahí, cada chat empieza con el resumen.</p>
+  </div>
+</section>
+
+<section id="ejemplo">
+  <div class="wrap">
+    <h2>Cómo se ve</h2>
+    <div class="terminal"><pre><span class="dim">[project memory] Start-of-session brief:
+- Memory owner: Ana (person:ana)
+- Project: Billing service — invoices for the EU subsidiaries
+Decisions and agreements in force (3):
+  · [decision:rounding] 2026-05-12 Round per line, not per invoice — why: the tax office checks line totals.
+Open questions (1):
+  · [question:currency] 2026-06-02 Do credit notes keep the original exchange rate?
+Pending actions: 1
+Last backup: 2026-06-20</span>
+
+<span class="you">tú ›</span> ¿por qué redondeamos por renglón?
+<span class="dim">agente › Por decision:rounding (12 de mayo, de Ana): la autoridad fiscal revisa los totales
+          por renglón. Sigue vigente; nada la ha reemplazado.</span>
+
+<span class="you">tú ›</span> las notas de crédito conservan el tipo de cambio original. Recuérdalo.
+<span class="dim">agente › Registrado como tu respuesta a question:currency, con tus palabras
+          como evidencia. La pregunta quedó cerrada.</span></pre></div>
+    <p class="meta">El resumen y lo guardado están en inglés; la conversación, en tu idioma.</p>
+  </div>
+</section>
+
+<section id="preguntas">
+  <div class="wrap">
+    <h2>Preguntas frecuentes</h2>
+    <details><summary>¿Algún dato sale de mi computadora?</summary>
+      <p>No. El helper no tiene código de red. El agente sigue enviando tu conversación a su proveedor de modelo como siempre; la memoria agrega a esa conversación el resumen y los resultados de las consultas que hace.</p></details>
+    <details><summary>¿Puedo editar o borrar algo?</summary>
+      <p>Se corrige en lugar de borrar: cerrar un hecho que terminó, retractar uno equivocado (con motivo), anular un evento, renombrar o retirar una entidad. La historia de cada cambio sigue legible.</p></details>
+    <details><summary>¿Por qué SQLite y no Markdown o una base vectorial?</summary>
+      <p>Porque las preguntas sobre un proyecto son sobre hechos, fechas, responsables, estados y conteos. SQLite las responde con exactitud, hace cumplir las reglas de sólo agregado, no necesita servidor y es un solo archivo portable.</p></details>
+    <details><summary>¿Mi equipo puede compartir una memoria?</summary>
+      <p>No en la 0.1.0. El archivo es local y está excluido de Git a propósito. Compartirlo requeriría sincronización y control de acceso por persona, que esta versión no ofrece.</p></details>
+    <details><summary>¿Con qué agentes funciona?</summary>
+      <p>Claude Code (con hooks) y Codex (con <code>AGENTS.md</code>). Cualquier agente que pueda leer un archivo de skill y ejecutar comandos puede seguir el mismo protocolo.</p></details>
+    <details><summary>¿En qué idioma trabaja?</summary>
+      <p>Todo lo guardado está en inglés para que cualquier agente lo lea; tus palabras literales se conservan como evidencia en su idioma original, y el agente te responde en el idioma que estés usando.</p></details>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    Memoria a largo plazo para IA · v0.1.0 · Licencia Apache 2.0 ·
+    <a href="https://github.com/proteo5/long-term-memory-for-AI">Código en GitHub</a> ·
+    <a href="../">English version</a>
+  </div>
+</footer>
+</body>
+</html>
