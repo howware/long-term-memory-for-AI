@@ -65,6 +65,7 @@ STANDARD_PREDICATES = (
     ("backup_path", "Backup taken first", "text", "one", 0),
     ("name", "Name in force (a rename; the entity keeps the name it was created with)", "text", "one", 1),
     ("requested_action", "What the pending actor is asked to do", "text", "one", 0),
+    ("high_volume", "High-volume event type (kept out of the brief's recent list)", "boolean", "one", 1),
 )
 
 

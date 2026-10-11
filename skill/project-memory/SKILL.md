@@ -40,9 +40,11 @@ words in whatever language they used.
    "answers question:…"), conventions, **open questions** (answered ones no
    longer appear), lessons, pending actions and the latest records. Each
    section shows up to 8; when it says "showing 8 of N", the "See all" line
-   has the `list` command that returns the rest. If a session hook already
-   injected it, do not repeat it. If it says there is no memory, go to
-   **Start the memory**.
+   has the `list` command that returns the rest. **High-volume** event types
+   (imported movements, readings, workflow transitions, backups) stay out of
+   "Most recent"; "High-volume activity" gives one line per type with how many
+   were recorded in the last 7 days. If a session hook already injected it, do
+   not repeat it. If it says there is no memory, go to **Start the memory**.
 2. For the shape of the data: `MEM catalog`. Note:
    - `entity_types`: small types (channels, categories, seasons) carry their
      `names`, the values to compare against;
@@ -54,7 +56,7 @@ words in whatever language they used.
    - `processes`, `change_rules`, `recipes`;
    - `people` (above 50, only those with current facts; see `people_total`),
      `actors` (sensors, systems, robots… by kind), `agents`, `event_types`
-     (periods, attributes and relations) and `integrity`.
+     (periods, attributes, relations and `high_volume`) and `integrity`.
 3. For a specific entity: `MEM search "<text>"` (entities; also finds tracking
    codes and identifiers stored as facts) and then `MEM describe <key>`; for
    its history, `MEM timeline <key>`. To search decisions, notes, sources and
@@ -358,6 +360,64 @@ not duplicate.
 
 `record-event`, `create-entity` and `transition` (the old mechanism, without
 versions) also exist for simple cases.
+
+### High-volume event types
+
+When events of a type arrive by the hundred (imported bank movements, sensor
+readings, log lines), they would fill the brief's "Most recent" and hide the
+decisions and questions a session needs first. A person declares the type
+high-volume:
+
+```text
+MEM define-event-type --type <type> --high-volume --by person:<id> [--reason "<why>"]
+MEM define-event-type --type <type> --normal --by person:<id>     # back to the recent list
+MEM event-types [--as-of D]                                       # how each type is treated
+```
+
+- It only changes the brief: those events leave "Most recent" and appear as
+  one line per type in "High-volume activity". `aggregate`, `list`,
+  `timeline`, `describe`, `pending` and `recall` count them as always.
+- It is versioned data: a `high_volume` fact on the entity
+  `event_type:<type>` and an `event_type_declared` event with who decided it
+  and why. Declaring it normal again keeps the earlier value in the history.
+- `workflow_transition` and `memory_backed_up` are high-volume by default;
+  declaring them `--normal` lists them again.
+- An importer should declare its type before the first import.
+
+### Money and exact quantities
+
+Store money, and any quantity that must add up exactly, as an **integer in
+its smallest unit**, with the unit declared on the predicate. Never use `real`
+for money: binary fractions drift by cents when added.
+
+```json
+{"predicates": [{"id": "amount", "value_type": "integer", "unit": "MXN_cent",
+                 "description": "Signed amount in cents: outflows negative, inflows positive"}]}
+```
+
+```text
+MEM aggregate --event-type <type> --measure sum:amount --by period:month
+```
+
+- `sum`, `min` and `max` over an integer attribute are exact integers (the
+  answer carries `unit`), with negative and positive values, per line
+  (`--line`) and per period. Convert when presenting: 1234567 `MXN_cent` is
+  $12,345.67 MXN.
+- `avg` returns a decimal number: round it when presenting, never when
+  storing.
+- A value with decimals is rejected by an integer predicate: convert it
+  before writing (round half away from zero, the way the source rounds).
+
+### Event keys and re-imports
+
+An event's `key` identifies it for good. Writing an event whose key already
+exists is a no-op for that event: it is reported in `events.existing` and the
+stored event is **not** changed, even if the new attributes differ (memory is
+append-only). So an importer can resend a file safely. If the source later
+corrects a record, record the correction as what it is: void the old event
+with a reason and write the corrected one under a new key, or write a
+follow-up event linked to it. Compare `existing` against what you sent to
+notice keys that were already there.
 
 ### Structured documents (books, manuals, contracts…)
 

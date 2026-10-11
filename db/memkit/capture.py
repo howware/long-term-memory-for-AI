@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from .base import ACTOR_KINDS, AGENT_KINDS, AGENT_NAMES, AGENT_SOURCE, MEMORY_KINDS, MemoryError, VOID_EVENT, active_event_sql, content_hash, detect_agent, entity_label, new_id, normalize_instant, parse_instant, utc_now
+from .base import ACTOR_KINDS, AGENT_KINDS, AGENT_NAMES, AGENT_SOURCE, DEFAULT_HIGH_VOLUME, MEMORY_KINDS, MemoryError, VOID_EVENT, active_event_sql, content_hash, detect_agent, entity_label, new_id, normalize_instant, parse_instant, query_bound, utc_now
 from .rules import split_path, validate_change_rule
 
 
@@ -554,6 +554,67 @@ class CaptureMixin:
             return {"predicate": predicate_id, **{k: sorted(v) if isinstance(v, set) else v
                                                   for k, v in self._vocabulary(connection, predicate_id).items()},
                     "warnings": report["warnings"]}
+
+    def _high_volume_types(self, connection: sqlite3.Connection, at: str | None = None) -> dict[str, bool]:
+        """Event types declared high-volume (True) or normal (False), now or at
+        an instant: the high_volume fact of each event_type:<type> profile,
+        over the defaults (DEFAULT_HIGH_VOLUME) that no person has changed."""
+        if at is None:
+            valid = "fact.assertion_state = 'asserted' AND fact.valid_to IS NULL"
+        else:
+            valid = ("fact.assertion_state <> 'retracted' AND julianday(fact.valid_from) <= julianday(:at) "
+                     "AND (fact.valid_to IS NULL OR julianday(fact.valid_to) > julianday(:at))")
+        declared = {row["key"][len("event_type:"):]: bool(row["value_boolean"]) for row in connection.execute(
+            f"""SELECT profile.external_key AS key, fact.value_boolean FROM entities AS profile
+                  JOIN assertions AS fact ON fact.subject_entity_id = profile.entity_id
+                 WHERE profile.entity_type = 'event_type_profile' AND fact.predicate_id = 'high_volume' AND {valid}""",
+            {"at": at})}
+        return {**{kind: True for kind in DEFAULT_HIGH_VOLUME}, **declared}
+
+    def high_volume_types(self, as_of: str | None = None) -> dict[str, bool]:
+        """Every event type with a declared (or default) treatment, now or as of an instant."""
+        with self.connection() as connection:
+            return self._high_volume_types(connection, query_bound(as_of, self.zone, "as_of") if as_of else None)
+
+    def define_event_type(self, event_type: str, high_volume: bool, performed_by: str, reason: str | None = None,
+                          source_text: str | None = None) -> dict[str, Any]:
+        """Declare how an event type is treated: high-volume types (imported
+        movements, readings, transitions) stay out of the brief's recent list,
+        which shows a count per type instead. A versioned fact on the profile
+        entity event_type:<type>; declaring it normal again closes nothing
+        away: the earlier value stays in the history (--as-of)."""
+        if not event_type or not event_type.replace("_", "").isalnum():
+            raise MemoryError(f"Event types are words joined by underscores, not {event_type!r}")
+        key = f"event_type:{event_type}"
+        with self.connection() as connection:
+            self._performer(connection, performed_by, person_only="Declaring how an event type is treated")
+            current = self._high_volume_types(connection).get(event_type, False)
+            latest = connection.execute(
+                """SELECT MAX(fact.valid_from) FROM entities AS profile JOIN assertions AS fact
+                    ON fact.subject_entity_id = profile.entity_id WHERE profile.external_key = ?""", (key,)).fetchone()[0]
+        if current == high_volume and latest is not None:
+            return {"event_type": event_type, "high_volume": high_volume, "changed": False}
+        # Validity is compared per second, as in define_values.
+        while latest and utc_now()[:19] <= latest[:19]:
+            time.sleep(0.05)
+        now = utc_now()
+        label = "a high-volume event type" if high_volume else "a normal event type"
+        summary = f"Declared {event_type} {label}" + (f": {reason}" if reason else ".")
+        self.write({
+            "source": {"type": "conversation" if source_text else "helper_command", "content": source_text or summary},
+            "performed_by": performed_by,
+            "entities": [{"key": key, "type": "event_type_profile", "name": f"Event type {event_type}",
+                          "description": f"How events of type {event_type} are treated by the memory."}],
+            "facts": [{"subject": key, "predicate": "high_volume", "value": high_volume, "valid_from": now}],
+            "events": [{"type": "event_type_declared", "occurred_at": now, "summary": summary,
+                        "attributes": {"rationale": reason} if reason else {},
+                        "participants": [{"entity": key, "role": "subject"}]}],
+        })
+        with self.connection() as connection:
+            stored = self._high_volume_types(connection).get(event_type, False)
+        if stored != high_volume:
+            raise MemoryError("The event type declaration was not persisted")
+        return {"event_type": event_type, "high_volume": stored, "changed": True}
 
     def _upsert_entity(self, connection: sqlite3.Connection, spec: dict[str, Any], now: str, report: dict[str, Any]) -> None:
         key, entity_type, name = spec.get("key"), spec.get("type"), spec.get("name")

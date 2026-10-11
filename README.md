@@ -7,7 +7,7 @@
 [![Tests](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml/badge.svg)](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-0.1.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-informational.svg)](CHANGELOG.md)
 
 **English** · [Español](README.es.md) · [Website](https://proteo5.github.io/long-term-memory-for-AI/)
 
@@ -161,13 +161,18 @@ You talk to the agent; the agent drives the helper. For reference
 | Record anything, atomically | `MEM write --file document.json` |
 | Totals, rankings and rows | `MEM aggregate …` · `MEM list …` |
 | What waits on someone | `MEM pending [--person <ref>]` |
+| Keep an imported or high-volume event type out of the brief's recent list | `MEM define-event-type --type <type> --high-volume --by person:<id>` |
 | Documents and versions | `MEM outline <root>` · `MEM history <ref>` · `MEM changeset <session>` |
 | Versioned processes | `MEM define-process` · `MEM start-process` · `MEM advance` · `MEM process-status` |
 | Backup | `MEM backup [--to <file or folder>]` |
 | Help and version | `MEM --help` · `MEM <command> --help` · `MEM --version` |
 
+Money and other exact quantities are stored as integers in their smallest unit (cents), with the
+unit declared on the predicate, so sums are exact; the agent converts when presenting.
+
 [`skill/project-memory/SKILL.md`](skill/project-memory/SKILL.md) is the complete reference: the
-JSON document format, query paths, status rules, recipes, processes, actors and documents.
+JSON document format, query paths, status rules, recipes, processes, actors, documents, high-volume
+event types, money and re-imports.
 
 ## Your data
 
@@ -197,7 +202,8 @@ JSON document format, query paths, status rules, recipes, processes, actors and 
 - **Keyword search.** `recall` uses SQLite full-text search with singular/plural matching, not
   semantic embeddings.
 - **Context cost.** The brief (the latest 8 items per section, typically a few thousand tokens) is
-  injected at every session start.
+  injected at every session start. High-volume event types (imports, readings) are summarized in
+  one line per type instead of filling it.
 - **A few writers.** SQLite serializes concurrent writes; it is not a multi-user server.
 - **Early version.** Commands and schema may evolve; upgrades migrate existing memories.
 

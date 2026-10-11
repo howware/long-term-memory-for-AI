@@ -28,7 +28,7 @@
 
 <main>
 <div class="wrap hero">
-  <p class="eyebrow">Un skill para Claude Code y Codex · v0.1.0</p>
+  <p class="eyebrow">Un skill para Claude Code y Codex · v0.2.0</p>
   <h1>Tu agente olvida. Su memoria no tiene por qué.</h1>
   <p class="lead">Long-Term Memory for AI les da a los agentes de programación una memoria persistente que vive en un
     archivo SQLite local dentro de cada proyecto. Una ventana nueva, sin ningún contexto, arranca desde lo que se decidió,
@@ -125,14 +125,14 @@
 <section id="limitaciones">
   <div class="wrap">
     <h2>Limitaciones</h2>
-    <p class="intro">La versión 0.1.0 ya es útil, y éstos son sus límites, dichos con honestidad.</p>
+    <p class="intro">La versión 0.2.0 ya es útil, y éstos son sus límites, dichos con honestidad.</p>
     <div class="grid">
       <div class="card warn"><h3>Una máquina, un proyecto</h3><p>La memoria es un archivo local. No hay sincronización, ni servidor, ni forma de compartirla entre compañeros o computadoras. No llega a claude.ai en el navegador.</p></div>
       <div class="card warn"><h3>Vale lo que se registra</h3><p>El agente decide qué guardar siguiendo el skill. Puede omitir cosas o registrarlas imperfectamente; la evidencia y la historia lo hacen visible y corregible, no imposible.</p></div>
       <div class="card warn"><h3>Nada se puede borrar</h3><p>Al ser sólo de agregado, un dato sensible no se puede eliminar con el helper; sólo corregir o retractar. No guardes secretos ni datos que podrían obligarte a borrar.</p></div>
       <div class="card warn"><h3>No está cifrada</h3><p>Quien pueda leer la carpeta del proyecto puede leer el archivo de memoria. Protégelo como el resto de tu código.</p></div>
       <div class="card warn"><h3>Búsqueda por palabras, no semántica</h3><p><code>recall</code> usa la búsqueda de texto completo de SQLite (con singular y plural), no embeddings. Los sinónimos sólo aparecen si las palabras están.</p></div>
-      <div class="card warn"><h3>Consume algo de contexto</h3><p>El resumen se inyecta al iniciar cada sesión: los 8 elementos más recientes por sección, normalmente unos pocos miles de tokens. Cada mensaje suma un recordatorio de una línea.</p></div>
+      <div class="card warn"><h3>Consume algo de contexto</h3><p>El resumen se inyecta al iniciar cada sesión: los 8 elementos más recientes por sección, normalmente unos pocos miles de tokens. Los tipos de evento de alto volumen (importaciones, lecturas) se resumen en una línea por tipo. Cada mensaje suma un recordatorio de una línea.</p></div>
       <div class="card warn"><h3>Pensada para pocos escritores</h3><p>SQLite soporta que unos cuantos agentes escriban a la vez (se esperan entre sí). No es un servidor de base de datos multiusuario.</p></div>
       <div class="card warn"><h3>Versión temprana</h3><p>Los comandos y el esquema todavía pueden cambiar. Las actualizaciones migran las memorias existentes, y una memoria más nueva abierta por un helper más viejo queda en sólo lectura en lugar de dañarse.</p></div>
     </div>
@@ -252,7 +252,7 @@ Last backup: 2026-06-20</span>
     <details><summary>¿Por qué SQLite y no Markdown o una base vectorial?</summary>
       <p>Porque las preguntas sobre un proyecto son sobre hechos, fechas, responsables, estados y conteos. SQLite las responde con exactitud, hace cumplir las reglas de sólo agregado, no necesita servidor y es un solo archivo portable.</p></details>
     <details><summary>¿Mi equipo puede compartir una memoria?</summary>
-      <p>No en la 0.1.0. El archivo es local y está excluido de Git a propósito. Compartirlo requeriría sincronización y control de acceso por persona, que esta versión no ofrece.</p></details>
+      <p>Todavía no. El archivo es local y está excluido de Git a propósito. Compartirlo requeriría sincronización y control de acceso por persona, que esta versión no ofrece.</p></details>
     <details><summary>¿Con qué agentes funciona?</summary>
       <p>Claude Code (con hooks) y Codex (con <code>AGENTS.md</code>). Cualquier agente que pueda leer un archivo de skill y ejecutar comandos puede seguir el mismo protocolo.</p></details>
     <details><summary>¿En qué idioma trabaja?</summary>
@@ -263,7 +263,7 @@ Last backup: 2026-06-20</span>
 
 <footer>
   <div class="wrap">
-    Memoria a largo plazo para IA · v0.1.0 · Licencia Apache 2.0 ·
+    Memoria a largo plazo para IA · v0.2.0 · Licencia Apache 2.0 ·
     <a href="https://github.com/proteo5/long-term-memory-for-AI">Código en GitHub</a> ·
     <a href="../">English version</a>
   </div>

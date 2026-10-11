@@ -14,7 +14,7 @@ from typing import Any
 
 # Version of the helper and its skill (semantic versioning); the schema has its own
 # version: the migrations applied to each memory.
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 
 # The helper travels with its migrations (db/ in this repository, scripts/ in
@@ -55,6 +55,12 @@ def shift_instant(instant: str, seconds: int) -> str:
 
 
 VOID_EVENT = "event_voided"
+
+
+# Event types that are high-volume unless a person declares otherwise
+# (define-event-type): they stay out of the brief's "most recent" list, which
+# shows a one-line count per type instead. Everything else still counts them.
+DEFAULT_HIGH_VOLUME = ("workflow_transition", "memory_backed_up")
 
 
 def entity_label(alias: str, at: str | None = None) -> str:

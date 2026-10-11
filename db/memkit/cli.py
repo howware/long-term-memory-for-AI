@@ -254,6 +254,16 @@ def main() -> None:
     values.add_argument("--entity-type", help="For entity predicates: the type of entity it must point to")
     values.add_argument("--by", required=True)
     values.add_argument("--source", help="Literal words of the decision")
+    kind = sub.add_parser("define-event-type", help="Declare an event type high-volume (out of the brief's recent list) or normal")
+    kind.add_argument("--type", required=True)
+    volume = kind.add_mutually_exclusive_group(required=True)
+    volume.add_argument("--high-volume", action="store_true", help="Kept out of the brief's recent list; counted per type")
+    volume.add_argument("--normal", action="store_true", help="Listed in the brief's recent list again")
+    kind.add_argument("--by", required=True, help="Person who decides it")
+    kind.add_argument("--reason")
+    kind.add_argument("--source", help="Literal words of the decision")
+    kinds = sub.add_parser("event-types", help="How each declared event type is treated (high-volume or normal)")
+    kinds.add_argument("--as-of", help="As it was at that instant")
     status = sub.add_parser("process-status", help="Step, version, pending holder, next steps and history of an instance")
     status.add_argument("instance")
     args = parser.parse_args()
@@ -409,6 +419,10 @@ def main() -> None:
             result = memory.process_definition(args.key, args.version)
         elif args.command == "define-values":
             result = memory.define_values(args.predicate, args.value, args.by, args.entity_type, args.source)
+        elif args.command == "define-event-type":
+            result = memory.define_event_type(args.type, args.high_volume, args.by, args.reason, args.source)
+        elif args.command == "event-types":
+            result = {"as_of": args.as_of, "high_volume": memory.high_volume_types(args.as_of)}
         elif args.command == "process-status":
             result = memory.process_status(args.instance)
         elif args.command == "define-status":

@@ -55,6 +55,12 @@ def render_brief(brief: dict[str, Any]) -> str:
     backup = brief.get("last_backup")
     lines.append(f"Last backup: {backup['occurred_at'][:10]} ({backup['path']})" if backup
                  else "Last backup: none yet (memory.py backup makes a verified copy)")
+    activity = brief.get("high_volume_activity") or []
+    if activity:
+        lines.append("High-volume activity (kept out of Most recent; use aggregate/list for detail):")
+        for item in activity:
+            lines.append(f"  · {item['type']}: {item['recorded_last_7_days']} recorded in the last 7 days; "
+                         f"last {item['last_recorded_at']}")
     if brief["recent"]:
         lines.append("Most recent:")
         for item in brief["recent"][:5]:
@@ -175,8 +181,10 @@ class ReadingMixin:
                      WHERE void.event_type = '{VOID_EVENT}' AND {active_event_sql('void')}
                      GROUP BY target.event_type"""
             ).fetchall())
+            volume = self._high_volume_types(connection)
             event_types = [
-                self._event_type_profile(connection, {**dict(row), "voided": voided.get(row["event_type"], 0)}, sample_size)
+                self._event_type_profile(connection, {**dict(row), "voided": voided.get(row["event_type"], 0),
+                                                      "high_volume": volume.get(row["event_type"], False)}, sample_size)
                 for row in connection.execute(
                     """
                     SELECT event_type, COUNT(*) AS count, MIN(occurred_at) AS first_at, MAX(occurred_at) AS last_at
@@ -973,6 +981,18 @@ class ReadingMixin:
                       AND attribute.record_id = event.event_id AND attribute.predicate_id = 'backup_path'
                     WHERE event.event_type = 'memory_backed_up' ORDER BY event.occurred_at DESC LIMIT 1""").fetchone()
             last_backup = dict(last) if last else None
+            # High-volume types (imports, readings, transitions) would bury what
+            # matters: they leave "recent" and get one line of activity each.
+            volume = self._high_volume_types(connection)
+            quiet = sorted(kind for kind, flag in volume.items() if flag)
+            activity = [dict(row) for row in connection.execute(
+                f"""SELECT event.event_type AS type,
+                           SUM(julianday(event.recorded_at) >= julianday('now', '-7 days')) AS recorded_last_7_days,
+                           MAX(event.recorded_at) AS last_recorded_at
+                      FROM events AS event
+                     WHERE event.event_type IN ({','.join('?' * len(quiet))}) AND {active_event_sql('event')}
+                     GROUP BY event.event_type ORDER BY event.event_type""", quiet)
+                if row["recorded_last_7_days"]] if quiet else []
             waiting = self.pending()
             pending_total = len(waiting)
             pending = list(reversed(waiting))[:limit]
@@ -983,10 +1003,10 @@ class ReadingMixin:
                                        ELSE entities.canonical_name || ' (agent observation)' END
                              FROM event_participants AS actor JOIN entities ON entities.entity_id = actor.entity_id
                             WHERE actor.event_id = event.event_id AND actor.role IN ('performed_by', 'observed_by')) AS by
-                     FROM events AS event WHERE event.event_type NOT IN ('workflow_transition', 'memory_backed_up')
+                     FROM events AS event WHERE event.event_type NOT IN (""" + ",".join("?" * len(quiet)) + """)
                       AND """ + active_event_sql("event") + """
                     ORDER BY event.recorded_at DESC, event.rowid DESC LIMIT ?""",
-                (limit,),
+                (*quiet, limit),
             ).fetchall()
             projects = connection.execute(
                 "SELECT canonical_name AS name, external_key, description FROM entities WHERE entity_type = 'project' ORDER BY canonical_name"
@@ -1021,6 +1041,7 @@ class ReadingMixin:
                 "lessons": {"open": lessons_total, "latest": lessons, "all": [every("lesson", "supersedes")]},
                 "pending_actions": {"open": pending_total, "latest": pending},
                 "last_backup": last_backup,
+                "high_volume_activity": activity,
                 "recent": [without_nulls(row) for row in recent],
                 "next_step": "Use search/describe/timeline/recall for detail and catalog for the structure.",
             }

@@ -7,7 +7,7 @@
 [![Tests](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml/badge.svg)](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml)
 [![Licencia: Apache 2.0](https://img.shields.io/badge/licencia-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB.svg)](https://www.python.org/)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.1.0-informational.svg)](CHANGELOG.md)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.2.0-informational.svg)](CHANGELOG.md)
 
 [English](README.md) · **Español** · [Sitio web](https://proteo5.github.io/long-term-memory-for-AI/es/)
 
@@ -162,14 +162,18 @@ Tú hablas con el agente; el agente maneja el helper. Como referencia
 | Registrar cualquier cosa, de forma atómica | `MEM write --file documento.json` |
 | Totales, rankings y renglones | `MEM aggregate …` · `MEM list …` |
 | Qué espera a alguien | `MEM pending [--person <ref>]` |
+| Sacar un tipo de evento importado o de alto volumen de lo reciente del resumen | `MEM define-event-type --type <tipo> --high-volume --by person:<id>` |
 | Documentos y versiones | `MEM outline <raíz>` · `MEM history <ref>` · `MEM changeset <sesión>` |
 | Procesos versionados | `MEM define-process` · `MEM start-process` · `MEM advance` · `MEM process-status` |
 | Respaldo | `MEM backup [--to <archivo o carpeta>]` |
 | Ayuda y versión | `MEM --help` · `MEM <comando> --help` · `MEM --version` |
 
+El dinero y otras cantidades exactas se guardan como enteros en su unidad mínima (centavos), con la
+unidad declarada en el predicado, así las sumas son exactas; el agente convierte al presentar.
+
 [`skill/project-memory/SKILL.md`](skill/project-memory/SKILL.md) es la referencia completa (en
 inglés): el formato de documentos JSON, rutas de consulta, reglas de estado, recetas, procesos,
-actores y documentos.
+actores, documentos, tipos de evento de alto volumen, dinero y reimportaciones.
 
 ## Tus datos
 
@@ -199,7 +203,8 @@ actores y documentos.
 - **Búsqueda por palabras.** `recall` usa la búsqueda de texto completo de SQLite con singular y
   plural, no embeddings semánticos.
 - **Costo de contexto.** El resumen (los 8 elementos más recientes por sección, normalmente unos
-  pocos miles de tokens) se inyecta al iniciar cada sesión.
+  pocos miles de tokens) se inyecta al iniciar cada sesión. Los tipos de evento de alto volumen
+  (importaciones, lecturas) se resumen en una línea por tipo en lugar de llenarlo.
 - **Pocos escritores.** SQLite serializa las escrituras concurrentes; no es un servidor multiusuario.
 - **Versión temprana.** Los comandos y el esquema pueden cambiar; las actualizaciones migran las
   memorias existentes.
