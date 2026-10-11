@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from .base import ACTOR_KINDS, AGENT_KINDS, AGENT_NAMES, AGENT_SOURCE, DEFAULT_HIGH_VOLUME, MEMORY_KINDS, MemoryError, VOID_EVENT, active_event_sql, content_hash, detect_agent, entity_label, new_id, normalize_instant, parse_instant, query_bound, utc_now
+from .base import ACTOR_KINDS, AGENT_KINDS, AGENT_NAMES, AGENT_SOURCE, DEFAULT_HIGH_VOLUME, MEMORY_KINDS, MemoryError, VOID_EVENT, active_event_sql, content_hash, detect_agent, entity_label, in_force_sql, new_id, normalize_instant, parse_instant, query_bound, utc_now
 from .rules import split_path, validate_change_rule
 
 
@@ -26,8 +26,8 @@ class CaptureMixin:
         if reference.isalnum() and len(reference) >= 5:
             row = connection.execute(
                 """SELECT entity.* FROM assertions AS code JOIN entities AS entity ON entity.entity_id = code.subject_entity_id
-                    WHERE code.predicate_id = 'tracking_code' AND code.value_text = ? AND code.assertion_state = 'asserted'
-                      AND code.valid_to IS NULL""",
+                    WHERE code.predicate_id = 'tracking_code' AND code.value_text = ?
+                      AND """ + in_force_sql("code"),
                 (reference.upper(),),
             ).fetchone()
             if row is not None:
@@ -502,7 +502,7 @@ class CaptureMixin:
                 """SELECT fact.predicate_id, fact.value_text FROM entities AS profile
                      JOIN assertions AS fact ON fact.subject_entity_id = profile.entity_id
                     WHERE profile.external_key = ? AND fact.predicate_id IN ('allowed_value', 'value_entity_type')
-                      AND fact.assertion_state = 'asserted' AND fact.valid_to IS NULL""",
+                      AND """ + in_force_sql("fact"),
                 (f"predicate:{predicate_id}",),
             ).fetchall()
             cache[predicate_id] = {
@@ -559,11 +559,7 @@ class CaptureMixin:
         """Event types declared high-volume (True) or normal (False), now or at
         an instant: the high_volume fact of each event_type:<type> profile,
         over the defaults (DEFAULT_HIGH_VOLUME) that no person has changed."""
-        if at is None:
-            valid = "fact.assertion_state = 'asserted' AND fact.valid_to IS NULL"
-        else:
-            valid = ("fact.assertion_state <> 'retracted' AND julianday(fact.valid_from) <= julianday(:at) "
-                     "AND (fact.valid_to IS NULL OR julianday(fact.valid_to) > julianday(:at))")
+        valid = in_force_sql("fact", ":at" if at is not None else None)
         declared = {row["key"][len("event_type:"):]: bool(row["value_boolean"]) for row in connection.execute(
             f"""SELECT profile.external_key AS key, fact.value_boolean FROM entities AS profile
                   JOIN assertions AS fact ON fact.subject_entity_id = profile.entity_id
@@ -769,7 +765,7 @@ class CaptureMixin:
             """SELECT entity.external_key, rule.value_json FROM entities AS entity
                  JOIN assertions AS rule ON rule.subject_entity_id = entity.entity_id
                 WHERE entity.entity_type = 'change_rule' AND rule.predicate_id = 'change_rule_definition'
-                  AND rule.assertion_state = 'asserted' AND rule.valid_to IS NULL"""
+                  AND """ + in_force_sql("rule")
         )]
 
     def _authorize_changes(self, connection: sqlite3.Connection, document: dict[str, Any], now: str) -> None:

@@ -4,6 +4,41 @@ All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org/). The schema has its own history:
 the migrations in `db/migrations/`, applied to each memory and recorded in it.
 
+## 0.3.0
+
+- **Behavior change: `fact:` no longer shows values that start in the
+  future.** "In force" is now one definition everywhere (paths, conditions,
+  `describe`, `detail`, `pending`, `catalog`, the brief and the read views): a
+  fact began at or before the instant, had not ended and was never retracted.
+  A value written today with a future `valid_from` waits for its start, and
+  the value it replaces stays in force until then. `describe` marks each fact
+  `in_force`; recall labels a future version `future`.
+- **`--as-of` reads facts and entity rows at that instant.** `fact:` steps
+  (in columns, `--by`, `--where`, `has:`/`no:`, measures) read the fact in
+  force at the instant, `since`/`until` refer to it, `link-in:` counts only
+  events that occurred before it, and entity rows are those that existed then
+  (recorded, or holding a fact that had begun) and were not yet retired.
+  Previously `fact:` always read today's value and entity rows were today's.
+- **`first(A | B | ...)`**: the value of the first path that has one, in
+  `--by`, `--column`, `--where`, `--order-by`, measures and recipes. Several
+  events in a path: the most recent wins; voided events never count. Another
+  path that may give several values is checked row by row as in `--by`
+  (rejected up front only in `--where` and status rules). It may continue
+  after an entity or an event (`first(A | B)/key`).
+- `--as-of` and `--since`/`--until` far in the future (`9999-12-31`) no longer
+  fail on Windows; an out-of-range bound is a clear error.
+- The reads in capture (tracking codes, vocabularies, high-volume types,
+  change rules) use the same "in force" definition; the write-side checks
+  that close the latest value keep looking at the latest one, even if it
+  starts in the future.
+- **Measures through a path**: `sum|avg|min|max:PATH` for any path ending in
+  a number, with the unit of its last predicate. An unknown step, a
+  non-numeric value or several values per row is now an error instead of an
+  empty result.
+- Migration `0011_facts_in_force` (additive): recreates the read views with
+  the new definition and adds an index for facts that end later than an
+  instant.
+
 ## 0.2.0
 
 - **High-volume event types.** `define-event-type --type T --high-volume --by

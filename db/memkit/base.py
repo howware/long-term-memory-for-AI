@@ -14,7 +14,7 @@ from typing import Any
 
 # Version of the helper and its skill (semantic versioning); the schema has its own
 # version: the migrations applied to each memory.
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 # The helper travels with its migrations (db/ in this repository, scripts/ in
@@ -63,18 +63,30 @@ VOID_EVENT = "event_voided"
 DEFAULT_HIGH_VOLUME = ("workflow_transition", "memory_backed_up")
 
 
+# The instant "now" inside SQL, in the canonical stored form.
+NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+
+
+def in_force_sql(alias: str, at: str | None = None) -> str:
+    """SQL condition: the fact is in force at an instant (an SQL expression;
+    default now). In force means it began at or before that instant (or has
+    no start), had not ended by then, and was never retracted: a retracted
+    fact was wrong, so it is true at no instant. A superseded or closed fact
+    is in force over its own period. A fact starting in the future is not in
+    force yet. This is the one definition every read uses."""
+    at = at or NOW_SQL
+    return (f"({alias}.assertion_state <> 'retracted' "
+            f"AND ({alias}.valid_from IS NULL OR julianday({alias}.valid_from) <= julianday({at})) "
+            f"AND ({alias}.valid_to IS NULL OR julianday({alias}.valid_to) > julianday({at})))")
+
+
 def entity_label(alias: str, at: str | None = None) -> str:
     """SQL expression: the name an entity goes by. A rename is a 'name' fact
     (temporal, with evidence); canonical_name keeps the name it was created
     with. With at (an SQL expression), the name in force at that instant."""
-    if at is None:
-        valid = "label.assertion_state = 'asserted' AND label.valid_to IS NULL"
-    else:
-        valid = (f"label.assertion_state <> 'retracted' AND julianday(label.valid_from) <= julianday({at}) "
-                 f"AND (label.valid_to IS NULL OR julianday(label.valid_to) > julianday({at}))")
     return (f"COALESCE((SELECT label.value_text FROM assertions AS label WHERE label.subject_entity_id = {alias}.entity_id "
-            f"AND label.predicate_id = 'name' AND {valid} ORDER BY julianday(label.valid_from) DESC LIMIT 1), "
-            f"{alias}.canonical_name)")
+            f"AND label.predicate_id = 'name' AND {in_force_sql('label', at)} "
+            f"ORDER BY julianday(label.valid_from) DESC LIMIT 1), {alias}.canonical_name)")
 
 
 def active_event_sql(alias: str) -> str:
@@ -249,8 +261,19 @@ def query_bound(value: str, zone: Any, field: str) -> str:
     except ValueError as error:
         raise MemoryError(f"{field} is not ISO-8601: {value!r}") from error
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=zone) if zone else parsed.astimezone()
-    return normalize_instant(parsed.isoformat(), field)
+        if zone:
+            parsed = parsed.replace(tzinfo=zone)
+        else:
+            try:
+                parsed = parsed.astimezone()
+            except (OSError, OverflowError, ValueError):
+                # The system clock cannot place far dates (Windows: year 3001+);
+                # today's offset is the reasonable reading of such a bound.
+                parsed = parsed.replace(tzinfo=datetime.now().astimezone().tzinfo)
+    try:
+        return normalize_instant(parsed.isoformat(), field)
+    except OverflowError as error:
+        raise MemoryError(f"{field} is out of range: {value!r}") from error
 
 
 def content_hash(text: str) -> str:

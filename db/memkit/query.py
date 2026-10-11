@@ -9,8 +9,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 
-from .base import DATE_LITERAL, MemoryError, active_event_sql, display_zone, parse_instant, query_bound, same_zone, shift_instant, utc_now, without_nulls, zone_label
-from .rules import CONDITION_OPERATORS, MULTIPLE, PLACEHOLDER, STATUS_OPERATORS, VALUE_COLUMNS, column_for, parse_condition, split_path, validate_recipe, validate_status_rule
+from .base import DATE_LITERAL, NOW_SQL, MemoryError, active_event_sql, in_force_sql, display_zone, parse_instant, query_bound, same_zone, shift_instant, utc_now, without_nulls, zone_label
+from .rules import CONDITION_OPERATORS, FIRST_CHECKS, MULTIPLE, PLACEHOLDER, STATUS_OPERATORS, VALUE_COLUMNS, column_for, parse_condition, split_path, validate_recipe, validate_status_rule
 
 
 class QueryMixin:
@@ -116,7 +116,7 @@ class QueryMixin:
                 if isinstance(operand, dict):
                     # Compare with the subject's own attribute (or current fact).
                     compiled = self._compile_path(connection, path, parameters, tag, f"{follow}.event_id", "'event'",
-                                                  f"{follow}.occurred_at")
+                                                  f"{follow}.occurred_at", at=f":{prefix}asof" if as_of else None)
                     subject_predicate = self._predicate(connection, operand["subject_attr"])
                     parameters[f"{tag}s"] = operand["subject_attr"]
                     column = column_for("subject_value", subject_predicate["value_type"])
@@ -127,7 +127,7 @@ class QueryMixin:
                     else:
                         right = (f"(SELECT {column} FROM assertions AS subject_value "
                                  f"WHERE subject_value.subject_entity_id = {subject} AND subject_value.predicate_id = :{tag}s "
-                                 f"AND subject_value.assertion_state = 'asserted' AND subject_value.valid_to IS NULL LIMIT 1)")
+                                 f"AND {in_force_sql('subject_value', f':{prefix}asof' if as_of else None)} LIMIT 1)")
                     left = compiled["value"]
                     if compiled["value_type"] == "datetime":
                         left, right = f"julianday({left})", f"julianday({right})"
@@ -136,6 +136,7 @@ class QueryMixin:
                     conditions.append(self._condition_sql(
                         connection, {"path": path, "op": operator, "value": operand}, parameters, tag,
                         f"{follow}.event_id", "'event'", f"{follow}.occurred_at", from_index=False,
+                        at=f":{prefix}asof" if as_of else None,
                     ))
             cases.append(
                 f"WHEN EXISTS (SELECT 1 FROM record_links AS {prefix}l{index} "
@@ -290,19 +291,26 @@ class QueryMixin:
         instant: str | None,
         line_target: str | None = None,
         row: tuple[str, str] | None = None,
+        at: str | None = None,
     ) -> dict[str, Any]:
         """Compile a path into correlated joins ending in an entity or a typed value.
 
         Steps: link:P (forward), link-in:P[TYPE] (events pointing here),
-        fact:P (current value), fact@row:P (value in force at the row's
-        instant), participant:ROLE, attr:A (attribute of the current record),
-        edge:A (attribute of the link or fact just followed: a line's quantity,
-        a presented document's number), since / until (when the fact just
-        followed began or ended: how long a case has been in its step);
-        'line' starts at the
-        line target. Returns joins, the value expression, whether it is an
-        entity or a value, its type and whether it may yield several values.
+        fact:P (value in force: now, or at the query's --as-of instant `at`),
+        fact@row:P (value in force at the row's instant), participant:ROLE,
+        attr:A (attribute of the current record), edge:A (attribute of the
+        link or fact just followed: a line's quantity, a presented document's
+        number), since / until (when the fact just followed began or ended:
+        how long a case has been in its step); 'line' starts at the line
+        target; first(A | B | ...) takes the first of several paths that has
+        a value. Returns joins, the value expression, whether it is an entity
+        or a value, its type, whether it may yield several values, the
+        predicate it ends in and, when its several values are events, the
+        alias that orders them.
         """
+        if path.startswith("first("):
+            return self._compile_first(connection, path, parameters, prefix, start, start_type, instant,
+                                       line_target, row, at)
         steps = split_path(path)
         # Inside a path every attribute or fact belongs to one known record, so
         # the per-record indexes are pinned (INDEXED BY): with a value
@@ -318,6 +326,18 @@ class QueryMixin:
         else:
             current, current_type = start, start_type
         multiple, last_edge, last_fact = False, None, None
+        # Several values that come from events (link-in) can be ordered by
+        # time; any other source of several values cannot.
+        event_order, other_multiple = None, False
+
+        def result(value: str, kind: str, value_type: str, several: bool, predicate: str | None = None) -> dict[str, Any]:
+            # record_type: SQL expression of what an entity-kind value is ('entity' or 'event'),
+            # so a path can continue from it (first(A | B)/key).
+            return {"joins": " ".join(joins), "value": value, "kind": kind, "value_type": value_type,
+                    "multiple": several, "predicate": predicate, "event_order": event_order,
+                    "other_multiple": other_multiple or (several and event_order is None),
+                    "record_type": current_type if kind == "entity" else None}
+
         for index, step in enumerate(steps):
             final = index == len(steps) - 1
             kind, _, name = step.partition(":")
@@ -336,16 +356,14 @@ class QueryMixin:
                 value = (f"(CASE {current_type} WHEN 'entity' THEN (SELECT {column[0]} FROM {source_table} AS {alias}k "
                          f"WHERE {alias}k.entity_id = {current}) WHEN 'event' THEN (SELECT {column[1]} FROM events AS {alias}v "
                          f"WHERE {alias}v.event_id = {current}) END)")
-                return {"joins": " ".join(joins), "value": value, "kind": "value", "value_type": "text",
-                        "multiple": multiple}
+                return result(value, "value", "text", multiple)
             if step in ("since", "until"):
                 if last_fact is None:
-                    raise MemoryError(f"{step} must follow a fact step, for example fact:process_step>{step}")
+                    raise MemoryError(f"{step} must follow a fact step, for example fact:process_step/{step}")
                 if not final:
                     raise MemoryError(f"{step} is a value; the path cannot continue after it")
                 column = "valid_from" if step == "since" else "valid_to"
-                return {"joins": " ".join(joins), "value": f"{last_fact}.{column}", "kind": "value",
-                        "value_type": "datetime", "multiple": multiple}
+                return result(f"{last_fact}.{column}", "value", "datetime", multiple)
             if not name:
                 raise MemoryError(f"Path step {step!r} needs a name, for example link:{step}")
             if kind == "link":
@@ -355,9 +373,15 @@ class QueryMixin:
                     f"CROSS JOIN record_links AS {alias} ON {alias}.source_record_type = {current_type} "
                     f"AND {alias}.source_record_id = {current} AND {alias}.predicate_id = :{parameter}"
                 )
-                current, current_type = f"{alias}.target_record_id", f"{alias}.target_record_type"
+                # When every stored link of P points to one kind of record, say so: a path that
+                # continues (first(A | B)/key) then needs no per-row test of what it reached.
+                targets = [row[0] for row in connection.execute(
+                    "SELECT DISTINCT target_record_type FROM record_links WHERE predicate_id = ? LIMIT 2", (name,))]
+                current = f"{alias}.target_record_id"
+                current_type = f"'{targets[0]}'" if len(targets) == 1 else f"{alias}.target_record_type"
                 last_edge, last_fact = ("'record_link'", f"{alias}.record_link_id"), None
-                multiple = multiple or predicate["cardinality"] != "one"
+                if predicate["cardinality"] != "one":
+                    multiple = other_multiple = True
             elif kind == "link-in":
                 name, _, event_type = name.partition("[")
                 self._predicate(connection, name)
@@ -366,6 +390,9 @@ class QueryMixin:
                 if event_type:
                     parameters[f"{parameter}t"] = event_type.rstrip("]")
                     event_filter = f" AND {alias}e.event_type = :{parameter}t"
+                if at is not None:
+                    # As of an instant, only events that had already happened.
+                    event_filter += f" AND julianday({alias}e.occurred_at) < julianday({at})"
                 joins.append(
                     f"CROSS JOIN record_links AS {alias} ON {alias}.target_record_type = {current_type} "
                     f"AND {alias}.target_record_id = {current} AND {alias}.predicate_id = :{parameter} "
@@ -375,26 +402,23 @@ class QueryMixin:
                     f"CROSS JOIN events AS {alias}e ON {alias}e.event_id = {alias}.source_record_id{event_filter} "
                     f"AND {active_event_sql(alias + 'e')}"
                 )
-                current, current_type, multiple = f"{alias}e.event_id", "'event'", True
+                current, current_type, multiple, event_order = f"{alias}e.event_id", "'event'", True, f"{alias}e"
                 last_edge, last_fact = ("'record_link'", f"{alias}.record_link_id"), None
             elif kind in ("fact", "fact@row"):
                 predicate = self._predicate(connection, name)
                 parameters[parameter] = name
                 if kind == "fact":
-                    validity = f"{alias}.assertion_state = 'asserted' AND {alias}.valid_to IS NULL"
+                    validity = in_force_sql(alias, at)
                 else:
                     if instant is None:
                         raise MemoryError("fact@row needs rows with an instant (events or their lines)")
-                    validity = (
-                        f"{alias}.assertion_state IN ('asserted', 'superseded') "
-                        f"AND ({alias}.valid_from IS NULL OR julianday({alias}.valid_from) <= julianday({instant})) "
-                        f"AND ({alias}.valid_to IS NULL OR julianday({alias}.valid_to) > julianday({instant}))"
-                    )
+                    validity = in_force_sql(alias, instant)
                 joins.append(
                     f"CROSS JOIN assertions AS {alias} INDEXED BY assertions_subject_predicate_time ON {alias}.subject_entity_id = {current} "
                     f"AND {alias}.predicate_id = :{parameter} AND {validity}"
                 )
-                multiple = multiple or predicate["cardinality"] != "one"
+                if predicate["cardinality"] != "one":
+                    multiple = other_multiple = True
                 last_edge, last_fact = ("'assertion'", f"{alias}.assertion_id"), alias
                 if predicate["value_type"] == "entity":
                     current, current_type = f"{alias}.value_entity_id", "'entity'"
@@ -403,14 +427,15 @@ class QueryMixin:
                 else:
                     if not final:
                         raise MemoryError(f"{name} holds {predicate['value_type']} values; the path cannot continue after it")
-                    return {"joins": " ".join(joins), "value": column_for(alias, predicate["value_type"]),
-                            "kind": "value", "value_type": predicate["value_type"], "multiple": multiple}
+                    return result(column_for(alias, predicate["value_type"]), "value", predicate["value_type"],
+                                  multiple, name)
             elif kind == "participant":
                 parameters[parameter] = name
                 joins.append(
                     f"CROSS JOIN event_participants AS {alias} ON {alias}.event_id = {current} AND {alias}.role = :{parameter}"
                 )
-                current, current_type, last_edge, last_fact, multiple = f"{alias}.entity_id", "'entity'", None, None, True
+                current, current_type, last_edge, last_fact = f"{alias}.entity_id", "'entity'", None, None
+                multiple = other_multiple = True
             elif kind in ("attr", "edge"):
                 if not final:
                     raise MemoryError(f"{step} is a value; the path cannot continue after it")
@@ -429,8 +454,7 @@ class QueryMixin:
                 if record_type == "'entity'":
                     joins.append(
                         f"CROSS JOIN assertions AS {alias} INDEXED BY assertions_subject_predicate_time ON {alias}.subject_entity_id = {record_id} "
-                        f"AND {alias}.predicate_id = :{parameter} AND {alias}.assertion_state = 'asserted' "
-                        f"AND {alias}.valid_to IS NULL"
+                        f"AND {alias}.predicate_id = :{parameter} AND {in_force_sql(alias, at)}"
                     )
                 else:
                     joins.append(
@@ -438,15 +462,107 @@ class QueryMixin:
                         f"AND {alias}.record_id = {record_id} AND {alias}.predicate_id = :{parameter}"
                     )
                 value_type = predicate["value_type"]
-                return {"joins": " ".join(joins), "value": column_for(alias, value_type),
-                        "kind": "entity" if value_type == "entity" else "value", "value_type": value_type,
-                        "multiple": multiple or predicate["cardinality"] != "one"}
+                # An event's or link's attributes hold one value per name (they are
+                # written as a mapping); an entity's facts follow the predicate.
+                if record_type == "'entity'" and predicate["cardinality"] != "one":
+                    multiple = other_multiple = True
+                return result(column_for(alias, value_type), "entity" if value_type == "entity" else "value",
+                              value_type, multiple, name)
             else:
                 raise MemoryError(
                     f"Unknown path step {step!r}; use link:P, link-in:P[TYPE], fact:P, fact@row:P, participant:ROLE, "
-                    "attr:A, edge:A, since, until, key, name, summary or start with line"
+                    "attr:A, edge:A, since, until, key, name, summary, first(A | B) or start with line"
                 )
-        return {"joins": " ".join(joins), "value": current, "kind": "entity", "value_type": "entity", "multiple": multiple}
+        return result(current, "entity", "entity", multiple)
+
+    def _run_first_checks(self, connection: sqlite3.Connection, ctes: str, parameters: dict[str, Any]) -> None:
+        """Reject a first(...) whose chosen path reaches several values for some
+        row of this query (the same rule as --by), before running it."""
+        for path, expression in parameters.pop(FIRST_CHECKS, []):
+            if connection.execute(f"{ctes} SELECT 1 FROM rows WHERE {expression} = :multiple LIMIT 1",
+                                  parameters).fetchone():
+                raise MemoryError(
+                    f"{path} reaches several values for some rows (a path other than link-in gave more than one); "
+                    "filter first, narrow that path or use a single-valued one")
+
+    def _compile_first(
+        self, connection: sqlite3.Connection, path: str, parameters: dict[str, Any], prefix: str, start: str,
+        start_type: str, instant: str | None, line_target: str | None, row: tuple[str, str] | None, at: str | None,
+    ) -> dict[str, Any]:
+        """first(A | B | ...): the value of the first path that has one for the
+        row. Every path must end in the same kind of value. A path whose
+        several values come from events (link-in) gives the most recent of
+        them (voided events never count); any other path that may give
+        several values is rejected. The path may continue after the closing
+        parenthesis when it ends in an entity: first(A | B)/fact:part_of."""
+        depth, close = 0, None
+        for position, character in enumerate(path):
+            if character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+                if depth == 0:
+                    close = position
+                    break
+        if close is None:
+            raise MemoryError(f"first( needs its closing parenthesis: {path!r}")
+        inner, rest = path[len("first("):close], path[close + 1:]
+        alternatives, depth, current = [], 0, ""
+        for character in inner:
+            depth += (character == "(") - (character == ")")
+            if character == "|" and depth == 0:
+                alternatives.append(current.strip())
+                current = ""
+            else:
+                current += character
+        alternatives.append(current.strip())
+        if len(alternatives) < 2 or not all(alternatives):
+            raise MemoryError("first() takes two or more paths separated by |, for example first(link:a | link:b)")
+        values, kinds, runtime_check, record_types = [], set(), False, set()
+        for number, alternative in enumerate(alternatives):
+            compiled = self._compile_path(connection, alternative, parameters, f"{prefix}a{number}", start, start_type,
+                                          instant, line_target, row, at)
+            kinds.add((compiled["kind"], compiled["value_type"]))
+            record_types.add(compiled["record_type"])
+            if compiled["other_multiple"]:
+                # Like --by: rejected only when some row really reaches several values. That is
+                # checked before the query runs (_run_first_checks), which needs the query's rows;
+                # conditions and status rules have none, so there it is rejected now.
+                if start != "rows.event_id":
+                    raise MemoryError(
+                        f"first(): {alternative} may give several values for a row; in a condition only several "
+                        "events (link-in) can be chosen from (the most recent wins). Narrow the path, or use it "
+                        "in --by, --column or a measure, where it is checked row by row")
+                values.append(f"(SELECT CASE WHEN COUNT(DISTINCT {compiled['value']}) > 1 THEN :multiple "
+                              f"ELSE MIN({compiled['value']}) END {compiled['joins']} "
+                              f"WHERE {compiled['value']} IS NOT NULL)")
+                runtime_check = True
+            else:
+                order = compiled["event_order"]
+                ordering = f" ORDER BY julianday({order}.occurred_at) DESC, {order}.rowid DESC" if order else ""
+                values.append(f"(SELECT {compiled['value']} {compiled['joins']} WHERE {compiled['value']} IS NOT NULL"
+                              f"{ordering} LIMIT 1)")
+            last_predicate = compiled["predicate"]
+        if len(kinds) > 1:
+            found = ", ".join(sorted(value_type for _, value_type in kinds))
+            raise MemoryError(f"first(): every path must end in the same kind of value; these end in {found}")
+        kind, value_type = kinds.pop()
+        expression = f"COALESCE({', '.join(values)})"
+        if runtime_check:
+            parameters.setdefault(FIRST_CHECKS, []).append((path, expression))
+        rest = rest.lstrip("/>")
+        if not rest:
+            return {"joins": "FROM (SELECT 1) AS seed", "value": expression, "kind": kind, "value_type": value_type,
+                    "multiple": False, "predicate": last_predicate, "event_order": None, "other_multiple": False}
+        if kind != "entity":
+            raise MemoryError(f"first(...) gives {value_type} values; a path can only continue after an entity")
+        # The chosen value may be an entity or an event (link:P to an event, link-in:P).
+        # One known type continues as it is; mixed ones are told apart per row.
+        record_type = next(iter(record_types)) if len(record_types) == 1 else None
+        if record_type not in ("'entity'", "'event'"):
+            record_type = f"(CASE WHEN EXISTS (SELECT 1 FROM events WHERE event_id = {expression}) THEN 'event' ELSE 'entity' END)"
+        return self._compile_path(connection, rest, parameters, f"{prefix}r", expression, record_type, instant,
+                                  None, None, at)
 
     def _literal(self, connection: sqlite3.Connection, value_type: str, raw: Any) -> Any:
         """Convert a condition value to the path's type."""
@@ -480,7 +596,7 @@ class QueryMixin:
 
     def _anchored_condition_sql(
         self, connection: sqlite3.Connection, condition: dict[str, Any], parameters: dict[str, Any], prefix: str,
-        start: str, start_type: str,
+        start: str, start_type: str, at: str | None = None,
     ) -> str | None:
         """Positive conditions on the row's own attribute, an entity's current
         fact or a direct link are answered from the value indexes first:
@@ -508,10 +624,8 @@ class QueryMixin:
             if value_type not in VALUE_COLUMNS or value_type == "json":
                 return None
             parameters[f"{prefix}p"] = name
-            if kind == "fact" or entity_rows:
-                table, key = "assertions", "subject_entity_id"
-                scope = "assertion_state = 'asserted' AND valid_to IS NULL"
-            else:
+            facts = kind == "fact" or entity_rows
+            if not facts:
                 table, key = "record_attributes", "record_id"
                 scope = f"record_type = {start_type}"
             column = VALUE_COLUMNS[value_type]
@@ -540,6 +654,16 @@ class QueryMixin:
                 tests += self._range_tests(column, value_type, operator, f"{prefix}v", parameters)
             else:
                 return None
+            if facts:
+                # In force at the instant: open facts that already began (the
+                # current-value indexes) plus facts that end later than it.
+                instant = at or NOW_SQL
+                started = f"(valid_from IS NULL OR julianday(valid_from) <= julianday({instant}))"
+                return (f"{start} IN (SELECT subject_entity_id FROM assertions WHERE predicate_id = :{prefix}p "
+                        f"AND assertion_state = 'asserted' AND valid_to IS NULL AND {started} AND {' AND '.join(tests)} "
+                        f"UNION ALL SELECT subject_entity_id FROM assertions WHERE predicate_id = :{prefix}p "
+                        f"AND valid_to IS NOT NULL AND assertion_state <> 'retracted' AND valid_to >= substr({instant}, 1, 19) "
+                        f"AND julianday(valid_to) > julianday({instant}) AND {started} AND {' AND '.join(tests)})")
             return f"{start} IN (SELECT {key} FROM {table} WHERE predicate_id = :{prefix}p AND {scope} AND {' AND '.join(tests)})"
         return None
 
@@ -563,17 +687,18 @@ class QueryMixin:
 
     def _condition_sql(
         self, connection: sqlite3.Connection, clause: Any, parameters: dict[str, Any], prefix: str,
-        start: str, start_type: str, instant: str | None, from_index: bool = True,
+        start: str, start_type: str, instant: str | None, from_index: bool = True, at: str | None = None,
     ) -> str:
         """from_index: start from the value indexes (only at the top of a query;
         inside a per-row context the IN list would be rebuilt for every row)."""
         condition = parse_condition(clause)
         if condition["path"].startswith("line"):
             raise MemoryError("where conditions start at the event or entity, not at a line")
-        anchored = from_index and self._anchored_condition_sql(connection, condition, parameters, prefix, start, start_type)
+        anchored = from_index and self._anchored_condition_sql(connection, condition, parameters, prefix, start,
+                                                               start_type, at)
         if anchored:
             return anchored
-        compiled = self._compile_path(connection, condition["path"], parameters, prefix, start, start_type, instant)
+        compiled = self._compile_path(connection, condition["path"], parameters, prefix, start, start_type, instant, at=at)
         joins, value, value_type = compiled["joins"], compiled["value"], compiled["value_type"]
         operator = condition["op"]
         if operator in ("has", "no"):
@@ -625,6 +750,7 @@ class QueryMixin:
             raise MemoryError("entity rows have no time or lines; use facts and paths")
         start = ("entities.entity_id", "'entity'") if entities_mode else ("events.event_id", "'event'")
         as_of_bound = query_bound(as_of, self.zone, "as_of") if as_of else None
+        at = ":asof" if as_of_bound else None
         parameters: dict[str, Any] = {
             "type": entity_type or event_type,
             "since": query_bound(since, self.zone, "since") if since else None,
@@ -649,13 +775,28 @@ class QueryMixin:
                 continue
             conditions.append(self._condition_sql(
                 connection, clause, parameters, f"w{index}", start[0], start[1],
-                None if entities_mode else "events.occurred_at",
+                None if entities_mode else "events.occurred_at", at=at,
             ))
         # Status rules evaluate several lookups per row: filter by cheaper conditions first.
         conditions += status_conditions
-        if entities_mode:
+        if entities_mode and not as_of_bound:
             base_select = ("SELECT entity_id AS event_id, NULL AS occurred_at FROM entities "
                            "WHERE entity_type = :type AND retired_at IS NULL")
+        elif entities_mode:
+            # As of an instant: entities that existed then (recorded by then, or
+            # holding a fact that had begun: history recorded later counts) and
+            # that no retirement had taken out of use yet.
+            base_select = (
+                "SELECT entity_id AS event_id, NULL AS occurred_at FROM entities WHERE entity_type = :type "
+                "AND (julianday(created_at) <= julianday(:asof) OR EXISTS (SELECT 1 FROM assertions AS began "
+                "INDEXED BY assertions_subject_predicate_time WHERE began.subject_entity_id = entities.entity_id "
+                "AND began.assertion_state <> 'retracted' AND julianday(began.valid_from) <= julianday(:asof))) "
+                "AND (retired_at IS NULL OR NOT EXISTS (SELECT 1 FROM event_participants AS retired "
+                "JOIN events AS retirement ON retirement.event_id = retired.event_id "
+                "AND retirement.event_type = 'entity_retired' "
+                "WHERE retired.entity_id = entities.entity_id AND retired.role IN ('subject', 'retired_part') "
+                "AND julianday(retirement.occurred_at) <= julianday(:asof) AND " + active_event_sql("retirement") + "))"
+            )
         else:
             base_select = (
                 "SELECT event_id, occurred_at FROM events WHERE event_type = :type "
@@ -687,6 +828,7 @@ class QueryMixin:
             "row_record": ("'entity'", "rows.row_id") if entities_mode else ("rows.row_type", "rows.row_id"),
             "line_target": "rows.line_target" if line else None,
             "as_of": as_of_bound,
+            "at": at,
         }
 
     @staticmethod
@@ -733,7 +875,7 @@ class QueryMixin:
                 # Periods follow the display zone: "2025" is the reader's 2025.
                 return f"local_time(:{prefix}, rows.occurred_at)", "text"
             compiled = self._compile_path(connection, over, parameters, prefix, "rows.event_id", source["row_start"],
-                                          source["row_instant"], "rows.line_target", source["row_record"])
+                                          source["row_instant"], "rows.line_target", source["row_record"], source["at"])
             if compiled["value_type"] != "datetime":
                 raise MemoryError(f"period:{period}@ needs a date; {over} holds {compiled['value_type']}")
             expression, joins, multiple = f"local_time(:{prefix}, {compiled['value']})", compiled["joins"], compiled["multiple"]
@@ -762,7 +904,7 @@ class QueryMixin:
             return "rows.occurred_at", "datetime"
         else:
             compiled = self._compile_path(connection, spec, parameters, prefix, "rows.event_id", source["row_start"],
-                                          source["row_instant"], source["line_target"], source["row_record"])
+                                          source["row_instant"], source["line_target"], source["row_record"], source["at"])
             expression, joins, multiple, value_type = (compiled["value"], compiled["joins"], compiled["multiple"],
                                                        compiled["value_type"])
         if not multiple:
@@ -780,8 +922,8 @@ class QueryMixin:
         for row in connection.execute(
             """SELECT (SELECT shown.name FROM entity_labels AS shown WHERE shown.entity_id = entity.entity_id) AS name, entity.external_key AS key, fact.value_text AS zone
                  FROM assertions AS fact JOIN entities AS entity ON entity.entity_id = fact.subject_entity_id
-                WHERE fact.predicate_id = 'time_zone' AND fact.assertion_state = 'asserted'
-                  AND fact.valid_to IS NULL AND fact.value_text IS NOT NULL
+                WHERE fact.predicate_id = 'time_zone' AND """ + in_force_sql("fact") + """
+                  AND fact.value_text IS NOT NULL
                 ORDER BY entity.canonical_name LIMIT 20"""
         ):
             try:
@@ -837,20 +979,30 @@ class QueryMixin:
                 groups.append((spec, expression))
                 group_kinds[index] = value_type
             function, _, attribute = measure.partition(":")
+            measured_predicate, measured_multiple = None, False
             if function == "count":
                 value_sql, aggregate_sql = "1", "COUNT(*)"
             elif function in ("sum", "avg", "min", "max") and attribute:
-                parameters["measure"] = attribute
-                if source["entities_mode"]:
-                    value_source = ("FROM assertions WHERE subject_entity_id = rows.row_id AND assertion_state = 'asserted' "
-                                    "AND valid_to IS NULL AND predicate_id = :measure")
+                # A bare name is the row's own attribute (an entity row's fact in force).
+                path = attribute if (":" in attribute or "(" in attribute) else f"attr:{attribute}"
+                compiled = self._compile_path(connection, path, parameters, "m", "rows.event_id", source["row_start"],
+                                              source["row_instant"], source["line_target"], source["row_record"],
+                                              source["at"])
+                if compiled["kind"] == "entity" or compiled["value_type"] not in ("integer", "real", "any"):
+                    raise MemoryError(f"measure {measure}: {attribute} holds {compiled['value_type']} values; "
+                                      "sum, avg, min and max need numbers")
+                measured_predicate, measured_multiple = compiled["predicate"], compiled["multiple"]
+                expression = compiled["value"]
+                if compiled["value_type"] == "any":
+                    expression = expression.replace("value_text", "value_integer, value_real")
+                if measured_multiple:
+                    value_sql = (f"(SELECT CASE WHEN COUNT({expression}) > 1 THEN :multiple ELSE MIN({expression}) END "
+                                 f"{compiled['joins']})")
                 else:
-                    value_source = ("FROM record_attributes WHERE record_type = rows.row_type "
-                                    "AND record_id = rows.row_id AND predicate_id = :measure")
-                value_sql = f"(SELECT COALESCE(value_integer, value_real) {value_source} LIMIT 1)"
+                    value_sql = f"(SELECT {expression} {compiled['joins']} LIMIT 1)"
                 aggregate_sql = f"{function.upper()}(measured.value)"
             else:
-                raise MemoryError("measure must be count, or sum|avg|min|max:ATTRIBUTE")
+                raise MemoryError("measure must be count, or sum|avg|min|max:ATTRIBUTE or :PATH ending in a number")
             group_columns = ", ".join(f"{sql} AS g{index}" for index, (_, sql) in enumerate(groups))
             group_names = ", ".join(f"g{index}" for index in range(len(groups)))
             ctes = (f"WITH {source['ctes']},\n"
@@ -864,6 +1016,11 @@ class QueryMixin:
             else:
                 ordering = "value DESC"
             parameters["limit"] = limit
+            self._run_first_checks(connection, ctes, parameters)
+            if measured_multiple and connection.execute(
+                    ctes + "SELECT 1 FROM measured WHERE value = :multiple LIMIT 1", parameters).fetchone():
+                raise MemoryError(f"measure {measure} reaches several values for some rows, so it cannot be added "
+                                  "up per row; filter first, use --line, or measure a single-valued path")
             result_rows = connection.execute(
                 ctes + f"""
                 SELECT {group_names + ', ' if groups else ''}{aggregate_sql} AS value,
@@ -884,11 +1041,12 @@ class QueryMixin:
                     ctes + "SELECT COUNT(*) AS rows, SUM(value IS NULL) AS missing FROM measured", parameters
                 ).fetchone()
             units = []
-            if attribute:
+            if measured_predicate:
+                # The unit of the predicate the measured path ends in.
                 units = [row[0] for row in connection.execute(
                     "SELECT unit FROM predicates WHERE predicate_id = ? AND unit IS NOT NULL "
                     "UNION SELECT DISTINCT unit FROM record_attributes WHERE predicate_id = ? AND unit IS NOT NULL",
-                    (attribute, attribute),
+                    (measured_predicate, measured_predicate),
                 )]
             for index, (spec, _) in enumerate(groups):
                 if any(row[f"g{index}"] == MULTIPLE for row in result_rows):
@@ -969,6 +1127,7 @@ class QueryMixin:
             ordering.append("rows.row_id")
             parameters.update(limit=limit, offset=offset)
             ctes = f"WITH {source['ctes']}\n"
+            self._run_first_checks(connection, ctes, parameters)
             total = connection.execute(ctes + "SELECT COUNT(*) FROM rows", parameters).fetchone()[0]
             result = connection.execute(
                 ctes + f"SELECT {', '.join(selected) or 'rows.row_id'} FROM rows ORDER BY {', '.join(ordering)} "

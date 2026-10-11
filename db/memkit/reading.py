@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any
 
-from .base import LINKED_EVENTS_CTE, MemoryError, VOID_EVENT, active_event_sql, entity_label, event_row, query_bound, recall_term, without_nulls, zone_label
+from .base import LINKED_EVENTS_CTE, MemoryError, VOID_EVENT, active_event_sql, entity_label, in_force_sql, event_row, query_bound, recall_term, without_nulls, zone_label
 
 
 def render_brief(brief: dict[str, Any]) -> str:
@@ -132,8 +132,7 @@ class ReadingMixin:
                 SELECT canonical_name AS name, external_key, description
                   FROM entities WHERE entity_type = 'person' AND retired_at IS NULL
                    {'' if people_total <= 50 else '''AND entity_id IN (
-                       SELECT subject_entity_id FROM assertions
-                        WHERE assertion_state = 'asserted' AND valid_to IS NULL)'''}
+                       SELECT subject_entity_id FROM assertions AS fact WHERE ''' + in_force_sql('fact') + ''')'''}
                  ORDER BY canonical_name LIMIT 50
                 """
             ).fetchall()
@@ -275,7 +274,7 @@ class ReadingMixin:
         (roles, plans, categories), with how many current facts or attributes
         hold each, so a cold agent can write conditions without guessing."""
         # One source per table and value kind, each served by its partial value index.
-        current = "assertion_state = 'asserted' AND valid_to IS NULL AND "
+        current = in_force_sql("assertions") + " AND "
         sources = [
             f"SELECT predicate_id, {column} AS value, {is_entity} AS is_entity FROM {table} WHERE {extra}{column} IS NOT NULL"
             for table, extra in (("assertions", current), ("record_attributes", ""))
@@ -407,8 +406,8 @@ class ReadingMixin:
                 """SELECT entity.entity_type, (SELECT shown.name FROM entity_labels AS shown WHERE shown.entity_id = entity.entity_id) AS name, entity.external_key, entity.description,
                           code.value_text AS tracking_code
                      FROM assertions AS code JOIN entities AS entity ON entity.entity_id = code.subject_entity_id
-                    WHERE code.predicate_id = 'tracking_code' AND code.value_text = ? AND code.assertion_state = 'asserted'
-                      AND code.valid_to IS NULL AND (? IS NULL OR entity.entity_type = ?)""",
+                    WHERE code.predicate_id = 'tracking_code' AND code.value_text = ? AND """ + in_force_sql("code") + """
+                      AND (? IS NULL OR entity.entity_type = ?)""",
                 (text.strip().upper(), entity_type, entity_type),
             ).fetchone()
             if coded:
@@ -423,8 +422,7 @@ class ReadingMixin:
                     f"""SELECT entity.entity_type, (SELECT shown.name FROM entity_labels AS shown WHERE shown.entity_id = entity.entity_id) AS name, entity.external_key, entity.description,
                                fact.predicate_id AS matched
                           FROM assertions AS fact JOIN entities AS entity ON entity.entity_id = fact.subject_entity_id
-                         WHERE fact.predicate_id IN ({marks}) AND fact.value_text = ? AND fact.assertion_state = 'asserted'
-                           AND fact.valid_to IS NULL
+                         WHERE fact.predicate_id IN ({marks}) AND fact.value_text = ? AND {in_force_sql('fact')}
                         UNION
                         SELECT entity.entity_type, entity.canonical_name, entity.external_key, entity.description,
                                fact.predicate_id || '>' || attribute.predicate_id
@@ -458,7 +456,8 @@ class ReadingMixin:
                        value_entity.external_key AS value_entity_key, assertion.valid_from,
                        assertion.valid_to, assertion.assertion_state, assertion.confidence,
                        (SELECT COUNT(*) FROM assertion_evidence AS support
-                         WHERE support.assertion_id = assertion.assertion_id) AS evidence_count
+                         WHERE support.assertion_id = assertion.assertion_id) AS evidence_count,
+                       """ + in_force_sql("assertion") + """ AS in_force
                   FROM assertions AS assertion
                   JOIN predicates AS predicate ON predicate.predicate_id = assertion.predicate_id
              LEFT JOIN entities AS value_entity ON value_entity.entity_id = assertion.value_entity_id
@@ -526,7 +525,9 @@ class ReadingMixin:
                 }),
                 # Data that qualifies a fact (a document's number, a requirement's
                 # mode) travels with it, like an event's attributes.
+                # in_force: the fact holds now (begun, not ended, never retracted).
                 "facts": [without_nulls({**{key: row[key] for key in row.keys() if key != "assertion_id"},
+                                         "in_force": bool(row["in_force"]),
                                          "attributes": fact_attributes.get(row["assertion_id"])}) for row in facts],
                 "incoming": incoming,
                 "activity": [dict(row) for row in activity],
@@ -734,7 +735,9 @@ class ReadingMixin:
                     fact = connection.execute(
                         """SELECT entity.entity_type, (SELECT shown.name FROM entity_labels AS shown WHERE shown.entity_id = entity.entity_id) AS name, entity.external_key,
                                   fact.predicate_id, fact.valid_from, fact.valid_to,
-                                  CASE WHEN fact.assertion_state = 'asserted' AND fact.valid_to IS NULL THEN 'current'
+                                  CASE WHEN """ + in_force_sql("fact") + """ THEN 'current'
+                                       WHEN fact.assertion_state <> 'retracted' AND julianday(fact.valid_from) > julianday('now')
+                                       THEN 'future'
                                        ELSE fact.assertion_state || CASE WHEN fact.valid_to IS NOT NULL THEN ' (ended)' ELSE '' END
                                   END AS version
                              FROM assertions AS fact JOIN entities AS entity ON entity.entity_id = fact.subject_entity_id
@@ -771,11 +774,7 @@ class ReadingMixin:
         at = query_bound(as_of, self.zone, "until") if as_of else None
 
         def valid(alias: str) -> str:
-            if at is None:
-                return f"{alias}.assertion_state = 'asserted' AND {alias}.valid_to IS NULL"
-            return (f"{alias}.assertion_state <> 'retracted' "
-                    f"AND ({alias}.valid_from IS NULL OR julianday({alias}.valid_from) <= julianday(:at)) "
-                    f"AND ({alias}.valid_to IS NULL OR julianday({alias}.valid_to) > julianday(:at))")
+            return in_force_sql(alias, ":at" if at else None)
 
         with self.connection() as connection:
             top = self.resolve_entity(connection, root)
@@ -1055,17 +1054,16 @@ class ReadingMixin:
             if person_reference:
                 person = self.resolve_entity(connection, person_reference)
                 roles = connection.execute(
-                    """SELECT value_entity_id FROM assertions WHERE subject_entity_id = ? AND predicate_id = 'holds_role'
-                        AND assertion_state = 'asserted' AND valid_to IS NULL""", (person["entity_id"],)).fetchall()
+                    """SELECT value_entity_id FROM assertions AS fact WHERE subject_entity_id = ? AND predicate_id = 'holds_role'
+                        AND """ + in_force_sql("fact"), (person["entity_id"],)).fetchall()
                 holders = (person["entity_id"], *(row[0] for row in roles))
             filter_sql = f"AND pending.value_entity_id IN ({','.join('?' * len(holders))})" if holders else ""
             rows = connection.execute(
                 f"""SELECT entity.external_key AS entity_key, {entity_label('entity')} AS entity_name,
                            holder.external_key AS pending_for_key, {entity_label('holder')} AS pending_for_name,
                            holder.entity_type AS pending_for_type,
-                           COALESCE((SELECT value_text FROM assertions WHERE subject_entity_id = entity.entity_id
-                                        AND predicate_id = 'process_step' AND assertion_state = 'asserted'
-                                        AND valid_to IS NULL),
+                           COALESCE((SELECT step.value_text FROM assertions AS step WHERE step.subject_entity_id = entity.entity_id
+                                        AND step.predicate_id = 'process_step' AND {in_force_sql('step')}),
                                     (SELECT state_name FROM memory_current_states WHERE entity_id = entity.entity_id))
                                AS step,
                            (SELECT value_text FROM record_attributes WHERE record_type = 'assertion'
@@ -1074,8 +1072,7 @@ class ReadingMixin:
                       FROM assertions AS pending
                       JOIN entities AS entity ON entity.entity_id = pending.subject_entity_id
                       JOIN entities AS holder ON holder.entity_id = pending.value_entity_id
-                     WHERE pending.predicate_id = 'pending_action_for' AND pending.assertion_state = 'asserted'
-                       AND pending.valid_to IS NULL {filter_sql}""",
+                     WHERE pending.predicate_id = 'pending_action_for' AND {in_force_sql('pending')} {filter_sql}""",
                 holders,
             ).fetchall()
             # An event waits on its pending_action_for participant until an

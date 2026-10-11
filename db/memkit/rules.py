@@ -236,8 +236,21 @@ PATH_SEPARATOR = re.compile(r"[>/]")
 
 def split_path(path: str) -> list[str]:
     """Steps of a path. '>' and '/' both separate them: '/' is safe to type
-    unquoted in a shell, where '>' redirects output to a file."""
-    return PATH_SEPARATOR.split(path)
+    unquoted in a shell, where '>' redirects output to a file. Separators
+    inside parentheses (first(A | B/C)) belong to the step."""
+    steps, depth, current = [], 0, ""
+    for character in path:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        if depth == 0 and PATH_SEPARATOR.match(character):
+            steps.append(current)
+            current = ""
+        else:
+            current += character
+    steps.append(current)
+    return steps
 
 
 # Operators need spaces around them: '>' also separates path steps.
@@ -245,6 +258,9 @@ CONDITION_OPERATORS = (" between ", " >= ", " <= ", " != ", " in ", " > ", " < "
 
 
 MULTIPLE = "\u0000multiple"
+# Key in a query's parameters: first(...) expressions to check row by row
+# before the query runs (never bound into SQL).
+FIRST_CHECKS = "\u0000first_checks"
 
 
 def column_for(alias: str, value_type: str) -> str:

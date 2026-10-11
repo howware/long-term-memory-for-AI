@@ -111,14 +111,32 @@ filters instead of fetching everything.
 
 ```text
 MEM aggregate --event-type <type> | --entity-type <type>
-              [--measure count|sum:ATTR|avg:ATTR|min:ATTR|max:ATTR] [--line PRED]
+              [--measure count|sum:X|avg:X|min:X|max:X] [--line PRED]
               [--by ...]... [--where CONDITION]... [--since D] [--until D] [--as-of D]
               [--order value|group] [--limit N] [--include-voided]
 ```
 
 **Rows.** Events of a type; their lines with `--line PRED` (each PRED link of
-the event, with its attributes); or the current entities of a type with
-`--entity-type` (there `attr:P` and `sum:P` read their current fact).
+the event, with its attributes); or the entities of a type with
+`--entity-type` (there `attr:P` and `sum:P` read their fact in force). With
+`--as-of D`, event rows are those that occurred before D and entity rows are
+those that existed at D (recorded by then, or holding a fact that had begun)
+and had not been retired by then.
+
+**Measures.** `count`, or `sum|avg|min|max:X` where X is an attribute of the
+row (a bare name: `sum:amount`) or **any path ending in a number**:
+`sum:link:recategorizes/attr:amount`, `max:fact:order_type/fact:fee`. The
+answer carries the unit of the predicate the path ends in. A path that gives
+several values for a row is an error (as in `--by`); an unknown step or a
+non-numeric value is an error, never an empty result.
+
+**In force.** A fact is in force at an instant when it began at or before it
+(or has no start), had not ended by then and was never retracted (a
+retraction means it was never true, so it counts at no instant; a superseded
+or closed fact counts over its own period). `fact:P` reads the fact in force
+**now**, or at the `--as-of` instant when one is given; a value whose
+`valid_from` is in the future is not in force yet, and the value it replaces
+stays in force until then. `describe` marks each fact `in_force`.
 
 **Paths.** Steps separated by `/` or `>` (prefer `/`: an unquoted `>` in a
 shell redirects the output to a file instead of passing it to the helper):
@@ -126,8 +144,8 @@ shell redirects the output to a file instead of passing it to the helper):
 | Step | Reaches |
 |---|---|
 | `link:P` | what the record links to with P |
-| `link-in:P` or `link-in:P[TYPE]` | the events (of that type) that link to this record with P |
-| `fact:P` | the entity's fact **in force now** |
+| `link-in:P` or `link-in:P[TYPE]` | the events (of that type) that link to this record with P (with `--as-of`, only those that occurred before it) |
+| `fact:P` | the entity's fact **in force now** (or at `--as-of`) |
 | `fact@row:P` | the fact **in force at the row's instant** (correct history) |
 | `participant:ROLE` | the participant with that role |
 | `attr:A` | an attribute of the current record (at the start: of the row) |
@@ -135,9 +153,26 @@ shell redirects the output to a file instead of passing it to the helper):
 | `since` / `until` | since / until when the fact just followed holds: `fact:process_step/since` is how long it has been in its step (sort, filter, group by period) |
 | `key` / `name` | key or name (the name in force, after renames) of the entity or event the path reached (at the start: of the row): `fact:for_customer/key`, `--where "key = order:1007"` |
 | `line` | at the start: the target of the line |
+| `first(A \| B \| …)` | at the start: the value of the first path that has one for the row |
 
 A path ends in an entity or a typed value (date, number, text, boolean).
 Nothing can follow a value.
+
+**`first(A | B | …)`** chooses between paths: the value of a row comes from
+one path unless another one overrides it. For example, the category of a
+movement comes from its rule unless an exception event points to it:
+`first(link-in:recategorizes/link:to_category | link:classified_by/fact:categorized_as)`.
+- Works in `--by`, `--column`, `--where`, `--order-by`, `--measure` and recipes.
+- Every path must end in the same kind of value (entities, or the same type).
+- If a path reaches **several events** (several exceptions), the most recent
+  one (by `occurred_at`) wins; voided events never count. Any other path that
+  may give several values (a `many` fact, a participant) is checked row by
+  row, like `--by`: in `--by`, `--column`, `--order-by` and measures the query
+  fails only if some row really reaches several. In `--where` (and status
+  rules) it is rejected up front; declare such links `cardinality: one`.
+- It may continue when it ends in an entity or an event:
+  `first(A | B)/fact:part_of`, `first(A | B)/key`.
+  It starts a path; it cannot appear after another step.
 
 **`--by`:** `period:day|week|month|year` (the event's date),
 `period:month@PATH` (any reachable date), `line`, `status:<rule>` or any path.

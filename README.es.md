@@ -7,7 +7,7 @@
 [![Tests](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml/badge.svg)](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml)
 [![Licencia: Apache 2.0](https://img.shields.io/badge/licencia-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB.svg)](https://www.python.org/)
-[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.2.0-informational.svg)](CHANGELOG.md)
+[![Versión](https://img.shields.io/badge/versi%C3%B3n-0.3.0-informational.svg)](CHANGELOG.md)
 
 [English](README.md) · **Español** · [Sitio web](https://proteo5.github.io/long-term-memory-for-AI/es/)
 
@@ -56,8 +56,9 @@ pasó, en lugar de reconstruirlo de conversaciones viejas o de notas en Markdown
 - **Evidencia y actores.** Cada registro conserva el texto literal del que salió y quién o qué lo
   produjo: una persona, un agente, un sistema, un sensor. Las decisiones siempre son de una persona.
 - **Preguntas sin SQL.** Totales y rankings (`aggregate`), listados (`list`), rutas entre
-  relaciones, estados derivados (reglas de estado), recetas guardadas, búsqueda `recall` y
-  pendientes por persona o rol.
+  relaciones, `first(A | B)` para que una ruta reemplace a otra, medidas a través de cualquier
+  ruta, estados derivados (reglas de estado), recetas guardadas, búsqueda `recall` y pendientes
+  por persona o rol. `--as-of` lee cada hecho como estaba en vigor en cualquier instante.
 - **Procesos versionados.** Flujos con roles, requisitos, excepciones con motivo, plazos y
   migraciones explícitas; los casos en curso conservan la versión con la que empezaron.
 - **Documentos estructurados.** Textos versionados párrafo por párrafo y agrupados en sesiones de

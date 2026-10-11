@@ -7,7 +7,7 @@
 [![Tests](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml/badge.svg)](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-0.2.0-informational.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-informational.svg)](CHANGELOG.md)
 
 **English** · [Español](README.es.md) · [Website](https://proteo5.github.io/long-term-memory-for-AI/)
 
@@ -56,8 +56,9 @@ instead of rebuilding it from old conversations or from Markdown notes.
 - **Evidence and actors.** Each record keeps the literal text it came from and who or what
   produced it: a person, an agent, a system, a sensor. Decisions always belong to a person.
 - **Questions without SQL.** Totals and rankings (`aggregate`), row listings (`list`), query paths
-  across relations, derived states (status rules), saved recipes, full-text `recall`, and pending
-  actions per person or role.
+  across relations, `first(A | B)` to let one path override another, measures through any path,
+  derived states (status rules), saved recipes, full-text `recall`, and pending actions per person
+  or role. `--as-of` reads every fact as it was in force at any instant.
 - **Versioned processes.** Workflows with roles, requirements, exceptions with a reason, deadlines
   and explicit migrations; running cases keep the version they started with.
 - **Structured documents.** Texts versioned paragraph by paragraph and grouped in work sessions
