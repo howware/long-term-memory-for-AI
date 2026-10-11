@@ -45,13 +45,15 @@ class StartInNewProject(unittest.TestCase):
 
         self.assertFalse(run("where", cwd=project)["exists"])
         result = run("init", "--owner-name", "Ana", "--owner-key", "person:ana", cwd=project)
-        database = project / ".memory" / "memory.sqlite"
-        self.assertEqual(Path(result["database"]), database)
+        # Resolved: temporary folders are symlinks on macOS (/var -> /private/var)
+        # and may come as 8.3 short names on Windows (RUNNER~1).
+        database = (project / ".memory" / "memory.sqlite").resolve()
+        self.assertEqual(Path(result["database"]).resolve(), database)
         self.assertTrue(result["created"])
         self.assertEqual((project / ".memory" / ".gitignore").read_text(encoding="utf-8").splitlines()[-1], "*")
         # A subdirectory of the project finds the same memory.
         catalog = run("catalog", cwd=project / "src")
-        self.assertEqual(Path(catalog["database"]), database)
+        self.assertEqual(Path(catalog["database"]).resolve(), database)
         self.assertEqual(catalog["people"][0]["external_key"], "person:ana")
         self.assertEqual(catalog["event_types"][0]["event_type"], "memory_initialized")
         self.assertEqual(run("timeline", "Ana", cwd=project)["events"][0]["performed_by_name"], "Ana")
