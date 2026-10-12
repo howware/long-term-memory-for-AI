@@ -20,6 +20,10 @@ survives across conversations. It lives in a single SQLite file inside each proj
 window, with no context at all, starts from what was decided, what is pending and what happened,
 instead of rebuilding it from old conversations or from Markdown notes.
 
+> **A [howware](https://howware.org) adapter.** Howwares (your know-how put to work by AI, without an app) use it
+> as their memory: the owner's records, the rules they teach and their history. It holds no rules of any job;
+> each howware brings its own seed and protocol.
+
 ## Contents
 
 - [Why](#why)

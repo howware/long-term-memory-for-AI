@@ -20,6 +20,10 @@ sobrevive entre conversaciones. Vive en un solo archivo SQLite dentro de cada pr
 ventana nueva, sin ningún contexto, arranca desde lo que se decidió, lo que está pendiente y lo que
 pasó, en lugar de reconstruirlo de conversaciones viejas o de notas en Markdown.
 
+> **Un adaptador de [howware](https://howware.org/es/).** Los howwares (tu saber hacer puesto a trabajar con IA,
+> sin app) lo usan como memoria: los registros del dueño, las reglas que enseña y su historia. No tiene reglas de
+> ningún trabajo; cada howware trae su propia semilla y su protocolo.
+
 ## Contenido
 
 - [Por qué](#por-qué)
