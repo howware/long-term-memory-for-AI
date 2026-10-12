@@ -4,12 +4,12 @@
 
 **Una memoria persistente, local y sólo de agregado para agentes de programación con IA.**
 
-[![Tests](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml/badge.svg)](https://github.com/proteo5/long-term-memory-for-AI/actions/workflows/tests.yml)
+[![Tests](https://github.com/howware/long-term-memory-for-AI/actions/workflows/tests.yml/badge.svg)](https://github.com/howware/long-term-memory-for-AI/actions/workflows/tests.yml)
 [![Licencia: Apache 2.0](https://img.shields.io/badge/licencia-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-3776AB.svg)](https://www.python.org/)
 [![Versión](https://img.shields.io/badge/versi%C3%B3n-0.3.0-informational.svg)](CHANGELOG.md)
 
-[English](README.md) · **Español** · [Sitio web](https://proteo5.github.io/long-term-memory-for-AI/es/)
+[English](README.md) · **Español** · [Sitio web](https://howware.org/long-term-memory-for-AI/es/)
 
 </div>
 
@@ -101,7 +101,7 @@ conservan en su idioma original y el agente te responde en el idioma que uses.
 Clona el repositorio e instala el skill una vez por máquina:
 
 ```bash
-git clone https://github.com/proteo5/long-term-memory-for-AI.git
+git clone https://github.com/howware/long-term-memory-for-AI.git
 cd long-term-memory-for-AI
 python tools/install_skill.py --target ~/.claude/skills/project-memory   # Claude Code
 python tools/install_skill.py --target ~/.codex/skills/project-memory    # Codex
