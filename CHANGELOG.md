@@ -4,6 +4,15 @@ All notable changes are listed here. Versions follow
 [Semantic Versioning](https://semver.org/). The schema has its own history:
 the migrations in `db/migrations/`, applied to each memory and recorded in it.
 
+## 0.4.0
+
+- **A resent keyed event gains the links it lacks.** The stored event and its
+  attributes still never change, but links in the new document that the event
+  does not have yet are added, once (links already there are skipped). Several
+  importers can now share one record, such as a bank transaction imported by
+  two howwares, and each add its own reading of it. Previously the whole event,
+  links included, was skipped.
+
 ## 0.3.0
 
 - **Behavior change: `fact:` no longer shows values that start in the

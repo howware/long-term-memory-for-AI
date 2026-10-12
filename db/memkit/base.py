@@ -14,7 +14,7 @@ from typing import Any
 
 # Version of the helper and its skill (semantic versioning); the schema has its own
 # version: the migrations applied to each memory.
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 # The helper travels with its migrations (db/ in this repository, scripts/ in

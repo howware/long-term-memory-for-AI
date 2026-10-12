@@ -168,6 +168,22 @@ class EventKeyIdempotencyTests(unittest.TestCase):
         self.assertEqual(self.memory.event("MOV-1")["attributes"]["amount"]["value"], -500)
         self.assertEqual(self.memory.aggregate("movement")["total_rows"], 1)
 
+    def test_a_second_importer_adds_its_links_once(self) -> None:
+        self.memory.write(self.document)
+        reading = {"source": {"type": "test_fixture", "content": "import by another howware"},
+                   "performed_by": "person:ana",
+                   "predicates": [{"id": "covers", "value_type": "entity"}],
+                   "entities": [{"key": "period:2026-01", "type": "period", "name": "January"}],
+                   "events": [{**self.document["events"][0], "attributes": {"amount": -700},
+                               "links": [{"predicate": "covers", "entity": "period:2026-01"}]}]}
+        first = self.memory.write(reading)
+        again = self.memory.write(reading)
+        self.assertEqual((first["events"]["existing"], first["links"]), (["MOV-1"], 1))
+        self.assertEqual(again["links"], 0)
+        event = self.memory.event("MOV-1")
+        self.assertEqual(event["attributes"]["amount"]["value"], -500)
+        self.assertEqual([link["target"] for link in event["links"] if link["predicate"] == "covers"], ["January"])
+
 
 if __name__ == "__main__":
     unittest.main()

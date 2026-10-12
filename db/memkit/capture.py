@@ -284,12 +284,19 @@ class CaptureMixin:
             for spec in document.get("events", []):
                 event_id = self._write_event(connection, spec, default_performer, evidence_id, now, report, attribute_history)
                 if event_id:
-                    written.append((event_id, spec))
+                    written.append((event_id, spec, False))
+                elif spec.get("links"):
+                    # A keyed event already recorded keeps its attributes, but
+                    # gains the links it lacks: several importers can share one
+                    # record and each add its own reading of it.
+                    existing = connection.execute(
+                        "SELECT event_id FROM events WHERE external_key = ?", (spec["key"],)).fetchone()
+                    written.append((existing["event_id"], spec, True))
             # Links run after every event exists, so events in one document
             # may reference each other by key.
-            for event_id, spec in written:
+            for event_id, spec, only_missing in written:
                 for link in spec.get("links", []):
-                    self._write_link(connection, event_id, link, evidence_id, now, report)
+                    self._write_link(connection, event_id, link, evidence_id, now, report, only_missing)
             for spec in document.get("observations", []):
                 self._write_observation(connection, spec, now, report)
             for spec in document.get("void", []):
@@ -1175,7 +1182,7 @@ class CaptureMixin:
 
     def _write_link(
         self, connection: sqlite3.Connection, event_id: str, spec: dict[str, Any],
-        evidence_id: str, now: str, report: dict[str, Any],
+        evidence_id: str, now: str, report: dict[str, Any], only_missing: bool = False,
     ) -> None:
         predicate = self._predicate(connection, spec["predicate"])
         if "entity" in spec:
@@ -1189,6 +1196,11 @@ class CaptureMixin:
             target_type, target_id = "event", target["event_id"]
         else:
             raise MemoryError("links need an entity or an event target")
+        if only_missing and connection.execute(
+                """SELECT 1 FROM record_links WHERE source_record_type = 'event' AND source_record_id = ?
+                      AND predicate_id = ? AND target_record_type = ? AND target_record_id = ? AND valid_to IS NULL""",
+                (event_id, predicate["predicate_id"], target_type, target_id)).fetchone():
+            return
         link_id = new_id()
         connection.execute(
             """INSERT INTO record_links(record_link_id, source_record_type, source_record_id, predicate_id,

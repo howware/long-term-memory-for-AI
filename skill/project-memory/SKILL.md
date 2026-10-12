@@ -454,6 +454,12 @@ with a reason and write the corrected one under a new key, or write a
 follow-up event linked to it. Compare `existing` against what you sent to
 notice keys that were already there.
 
+The one thing a resent event adds is **links it does not have yet**: each
+link is written once, and links already there are skipped. That is how
+several importers share one record (a bank transaction imported by two
+tools): the first stores the event, and each one adds its own reading of it
+as links (`classified_by`, `covers`…) without duplicating anything.
+
 ### Structured documents (books, manuals, contracts…)
 
 A document is entities joined by the standard facts `part_of` (the parent)
